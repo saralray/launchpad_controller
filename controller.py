@@ -22,6 +22,8 @@ load_dotenv()
 HASS_URL   = os.getenv("HASS_URL")
 HASS_TOKEN = os.getenv("HASS_TOKEN")
 
+PASSIVE_MODE = not (HASS_URL and HASS_TOKEN)
+
 HEADERS = {
     "Authorization": f"Bearer {HASS_TOKEN}",
     "Content-Type": "application/json"
@@ -35,6 +37,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 inport = None
 outport = None
+current_in_name = None
+current_out_name = None
 _last_update = 0
 
 # ============================================================
@@ -60,12 +64,16 @@ signal.signal(signal.SIGINT, shutdown)
 # ============================================================
 
 def open_ports():
-    """Wait for Launchpad, open DA input + MI output (no mode control)."""
-    global inport, outport
+    """Wait for Launchpad, open DA input + MI output."""
+    global inport, outport, current_in_name, current_out_name
 
     while True:
-        ins  = mido.get_input_names()
-        outs = mido.get_output_names()
+        try:
+            ins  = mido.get_input_names()
+            outs = mido.get_output_names()
+        except Exception:
+            time.sleep(2)
+            continue
 
         in_name = next(
             (p for p in ins if "launchpad" in p.lower() and "da" in p.lower()),
@@ -73,9 +81,6 @@ def open_ports():
         )
 
         out_name = next(
-            (p for p in outs if "launchpad" in p.lower() and "mi" in p.lower()),
-            None
-        ) or next(
             (p for p in outs if "launchpad" in p.lower()),
             None
         )
@@ -84,6 +89,8 @@ def open_ports():
             try:
                 inport  = mido.open_input(in_name)
                 outport = mido.open_output(out_name)
+                current_in_name = in_name
+                current_out_name = out_name
                 print(f"✅ Connected: {in_name} / {out_name}")
                 return
             except Exception as e:
@@ -92,11 +99,24 @@ def open_ports():
         print("🔄 Waiting for Launchpad...")
         time.sleep(2)
 
+def ports_still_present():
+    """Check if the previously opened MIDI ports still exist."""
+    if not current_in_name or not current_out_name:
+        return False
+    try:
+        ins  = mido.get_input_names()
+        outs = mido.get_output_names()
+        return current_in_name in ins and current_out_name in outs
+    except Exception:
+        return False
+
 # ============================================================
 # HOME ASSISTANT
 # ============================================================
 
 def call_ha(domain, svc, data):
+    if PASSIVE_MODE:
+        return
     try:
         requests.post(
             f"{HASS_URL}/api/services/{domain}/{svc}",
@@ -109,6 +129,8 @@ def call_ha(domain, svc, data):
         print("❌ HA error:", e)
 
 def get_states():
+    if PASSIVE_MODE:
+        return {}
     try:
         r = requests.get(
             f"{HASS_URL}/api/states",
@@ -135,13 +157,14 @@ def is_on(ids, states):
 def set_pad(key, val, is_cc):
     if not outport:
         return
-
-    if is_cc:
-        msg = mido.Message("control_change", control=key, value=val)
-    else:
-        msg = mido.Message("note_on", note=key, velocity=val)
-
-    outport.send(msg)
+    try:
+        if is_cc:
+            msg = mido.Message("control_change", control=key, value=val)
+        else:
+            msg = mido.Message("note_on", note=key, velocity=val)
+        outport.send(msg)
+    except Exception:
+        pass
 
 def update_pads():
     global _last_update
@@ -179,9 +202,12 @@ def update_pads():
 # ============================================================
 
 def _on_ws_message(ws, msg):
-    d = json.loads(msg)
-    if d.get("type") == "event":
-        update_pads()
+    try:
+        d = json.loads(msg)
+        if d.get("type") == "event":
+            update_pads()
+    except Exception:
+        pass
 
 def _on_ws_open(ws):
     ws.send(json.dumps({"type": "auth", "access_token": HASS_TOKEN}))
@@ -192,10 +218,13 @@ def _on_ws_open(ws):
     }))
 
 def _start_ws():
+    if PASSIVE_MODE:
+        return
+    ws_url = HASS_URL.replace("http", "ws") + "/api/websocket"
     while True:
         try:
             ws = websocket.WebSocketApp(
-                HASS_URL.replace("http", "ws") + "/api/websocket",
+                ws_url,
                 on_open=_on_ws_open,
                 on_message=_on_ws_message
             )
@@ -221,11 +250,34 @@ active_room = rooms[0]
 
 threading.Thread(target=_start_ws, daemon=True).start()
 
-print("🚀 Controller Started (PASSIVE MODE)")
+mode_text = "PASSIVE MODE" if PASSIVE_MODE else "ACTIVE MODE"
+print(f"🚀 Controller Started ({mode_text})")
 update_pads()
+
+last_health_check = 0
 
 while True:
     try:
+        # 🔍 health check every 1 second
+        if time.time() - last_health_check > 1:
+            last_health_check = time.time()
+            if not ports_still_present():
+                print("🔌 Launchpad disconnected, waiting to reconnect…")
+                try:
+                    if inport:
+                        inport.close()
+                    if outport:
+                        outport.close()
+                except Exception:
+                    pass
+                inport = outport = None
+                open_ports()
+                update_pads()
+
+        if not inport:
+            time.sleep(0.1)
+            continue
+
         for msg in inport.iter_pending():
             # Room select (CC)
             if msg.type == "control_change":
@@ -251,10 +303,18 @@ while True:
 
                         update_pads()
 
-        time.sleep(0.01)
+        time.sleep(0.02)
 
     except Exception as e:
         print("❌ MIDI error:", e)
+        try:
+            if inport:
+                inport.close()
+            if outport:
+                outport.close()
+        except Exception:
+            pass
         inport = outport = None
+        time.sleep(2)
         open_ports()
         update_pads()

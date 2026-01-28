@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # launchpad_controller.py
 
 import mido
@@ -8,218 +9,239 @@ import threading
 import websocket
 import urllib3
 import os
+import signal
+import sys
 from dotenv import load_dotenv
 
-# === CONFIG ===
+# ============================================================
+# ENV / CONFIG
+# ============================================================
+
 load_dotenv()
+
 HASS_URL   = os.getenv("HASS_URL")
 HASS_TOKEN = os.getenv("HASS_TOKEN")
-HEADERS    = {
+
+HEADERS = {
     "Authorization": f"Bearer {HASS_TOKEN}",
-    "Content-Type":  "application/json"
+    "Content-Type": "application/json"
 }
 
-# Disable SSL warnings (for self-signed certs)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Global MIDI ports
+# ============================================================
+# GLOBALS
+# ============================================================
+
 inport = None
 outport = None
+_last_update = 0
+
+# ============================================================
+# SHUTDOWN (systemd-safe)
+# ============================================================
+
+def shutdown(sig, frame):
+    print("🛑 Shutting down...")
+    try:
+        if inport:
+            inport.close()
+        if outport:
+            outport.close()
+    except Exception:
+        pass
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, shutdown)
+signal.signal(signal.SIGINT, shutdown)
+
+# ============================================================
+# MIDI SETUP (PASSIVE – NO MODE SWITCH)
+# ============================================================
 
 def open_ports():
-    """Scan and open the Launchpad MIDI ports, retry every 2 seconds."""
+    """Wait for Launchpad, open DA input + MI output (no mode control)."""
     global inport, outport
+
     while True:
         ins  = mido.get_input_names()
         outs = mido.get_output_names()
-        print("🔍 MIDI inputs:",  ins)
-        print("🔍 MIDI outputs:", outs)
 
-        # find any port name containing 'launchpad'
-        in_name  = next((p for p in ins  if "launchpad" in p.lower()), None)
-        out_name = next((p for p in outs if "launchpad" in p.lower()), None)
+        in_name = next(
+            (p for p in ins if "launchpad" in p.lower() and "da" in p.lower()),
+            None
+        )
+
+        out_name = next(
+            (p for p in outs if "launchpad" in p.lower() and "mi" in p.lower()),
+            None
+        ) or next(
+            (p for p in outs if "launchpad" in p.lower()),
+            None
+        )
 
         if in_name and out_name:
             try:
                 inport  = mido.open_input(in_name)
                 outport = mido.open_output(out_name)
-                print(f"✅ Connected to Launchpad: in={in_name}, out={out_name}")
+                print(f"✅ Connected: {in_name} / {out_name}")
                 return
             except Exception as e:
-                print("❌ Error opening ports:", e)
+                print("❌ MIDI open error:", e)
 
-        print("🔄 Launchpad not found. Retrying in 2s…")
+        print("🔄 Waiting for Launchpad...")
         time.sleep(2)
 
-# attempt initial connection
-open_ports()
+# ============================================================
+# HOME ASSISTANT
+# ============================================================
 
-# load config.json
-with open("config.json") as f:
-    rooms = json.load(f).get("rooms", [])
-if not rooms:
-    print("❌ No rooms in config.json")
-    exit(1)
-active_room = rooms[0]
-
-# --- Home Assistant helpers with debug ---
 def call_ha(domain, svc, data):
-    print(f"[DEBUG] HA → {domain}/{svc} {data}")
-    url = f"{HASS_URL}/api/services/{domain}/{svc}"
     try:
-        r = requests.post(url,
-                          headers=HEADERS,
-                          json=data,
-                          timeout=3,
-                          verify=False)
-        print(f"[DEBUG]   ← {r.status_code} {r.text}")
-        if not r.ok:
-            print(f"❌ HA error {r.status_code}: {r.text}")
+        requests.post(
+            f"{HASS_URL}/api/services/{domain}/{svc}",
+            headers=HEADERS,
+            json=data,
+            timeout=3,
+            verify=False
+        )
     except Exception as e:
-        print("❌ HA exception:", e)
+        print("❌ HA error:", e)
 
 def get_states():
     try:
-        r = requests.get(f"{HASS_URL}/api/states",
-                         headers=HEADERS,
-                         timeout=3,
-                         verify=False)
+        r = requests.get(
+            f"{HASS_URL}/api/states",
+            headers=HEADERS,
+            timeout=3,
+            verify=False
+        )
         r.raise_for_status()
         return {s["entity_id"]: s for s in r.json()}
-    except Exception as e:
-        print("❌ State fetch error:", e)
+    except Exception:
         return {}
 
 def is_on(ids, states):
     for e in (ids if isinstance(ids, list) else [ids]):
         st = states.get(e, {}).get("state")
-        dom = e.split(".")[0]
-        if dom == "climate" and st == "cool":
-            return True
-        if st == "on":
+        if st in ("on", "cool"):
             return True
     return False
 
-# --- Launchpad LED control ---
+# ============================================================
+# LED / PAD CONTROL
+# ============================================================
+
 def set_pad(key, val, is_cc):
-    if outport is None: return
-    msg = (mido.Message("control_change", control=key, value=val)
-           if is_cc else
-           mido.Message("note_on",      note=key, velocity=val))
+    if not outport:
+        return
+
+    if is_cc:
+        msg = mido.Message("control_change", control=key, value=val)
+    else:
+        msg = mido.Message("note_on", note=key, velocity=val)
+
     outport.send(msg)
 
 def update_pads():
+    global _last_update
+
+    if time.time() - _last_update < 0.2:
+        return
+    _last_update = time.time()
+
     states = get_states()
-    # room selectors
+
+    # room buttons (CC)
     for room in rooms:
         any_on = any(is_on(a["entity_ids"], states) for a in room["actions"])
-        col = room.get("room_key_color_any_on",9) if any_on else room.get("room_key_color_off",5)
-        set_pad(room["room_key"], col, True)
+        set_pad(
+            room["room_key"],
+            room.get("room_key_color_any_on", 9)
+            if any_on else room.get("room_key_color_off", 5),
+            True
+        )
 
-    # action buttons
+    # action pads (notes)
     for act in active_room["actions"]:
-        key    = act["key"]
-        ids    = act["entity_ids"]
-        dom    = ids[0].split(".")[0]
+        ids = act["entity_ids"]
+        on  = is_on(ids, states)
+        set_pad(act["key"], act["on_color"] if on else act["off_color"], False)
 
-        # custom service
-        if "service" in act:
-            call_ha(dom, act["service"], act["service_data"])
-            color = act.get("on_color")
-        # climate
-        elif dom == "climate":
-            st = states.get(ids[0],{}).get("state","")
-            color = act.get("on_color") if st=="cool" else act.get("off_color")
-        # brightness
-        elif "brightness" in act:
-            cur = states.get(ids[0],{}).get("attributes",{}).get("brightness",0)
-            color = act.get("on_color") if cur>=act["brightness"] else act.get("off_color")
-        # default on/off
-        else:
-            on_state = is_on(ids, states)
-            color = act.get("on_color") if on_state else act.get("off_color")
-
-        set_pad(key, color, False)
-
-    # clear unused pads
+    # clear unused grid (8x8)
     used = {r["room_key"] for r in rooms} | {a["key"] for a in active_room["actions"]}
-    for k in range(128):
+    for k in range(64):
         if k not in used:
-            set_pad(k,0,True)
-            set_pad(k,0,False)
+            set_pad(k, 0, False)
 
-def switch_room(cc):
-    global active_room
-    for room in rooms:
-        if room["room_key"] == cc:
-            active_room = room
-            update_pads()
-            break
-
-# --- WebSocket for realtime updates ---
-WS_URL = HASS_URL.replace("http","ws") + "/api/websocket"
-_ws_id = 1
+# ============================================================
+# WEBSOCKET (REALTIME UPDATES)
+# ============================================================
 
 def _on_ws_message(ws, msg):
     d = json.loads(msg)
-    if d.get("type")=="event" and d["event"]["event_type"]=="state_changed":
+    if d.get("type") == "event":
         update_pads()
 
 def _on_ws_open(ws):
-    global _ws_id
-    ws.send(json.dumps({"type":"auth","access_token":HASS_TOKEN}))
-    ws.send(json.dumps({"id":_ws_id,"type":"subscribe_events","event_type":"state_changed"}))
-    _ws_id += 1
+    ws.send(json.dumps({"type": "auth", "access_token": HASS_TOKEN}))
+    ws.send(json.dumps({
+        "id": 1,
+        "type": "subscribe_events",
+        "event_type": "state_changed"
+    }))
 
 def _start_ws():
-    websocket.enableTrace(False)
-    ws = websocket.WebSocketApp(WS_URL,
-                                on_open=_on_ws_open,
-                                on_message=_on_ws_message)
-    ws.run_forever()
+    while True:
+        try:
+            ws = websocket.WebSocketApp(
+                HASS_URL.replace("http", "ws") + "/api/websocket",
+                on_open=_on_ws_open,
+                on_message=_on_ws_message
+            )
+            ws.run_forever(ping_interval=30, ping_timeout=10)
+        except Exception as e:
+            print("⚠️ WS reconnect:", e)
+        time.sleep(5)
+
+# ============================================================
+# MAIN
+# ============================================================
+
+open_ports()
+
+with open("config.json") as f:
+    rooms = json.load(f).get("rooms", [])
+
+if not rooms:
+    print("❌ No rooms defined in config.json")
+    sys.exit(1)
+
+active_room = rooms[0]
 
 threading.Thread(target=_start_ws, daemon=True).start()
 
-# --- MAIN LOOP with debug and auto-reconnect ---
-print("🚀 Controller Started")
+print("🚀 Controller Started (PASSIVE MODE)")
 update_pads()
 
 while True:
-    # if unplugged, attempt reconnect
-    if inport is None or outport is None:
-        print("🔌 Launchpad disconnected, retrying…")
-        open_ports()
-        print("🔋 Reconnected, restoring LEDs…")
-        update_pads()
-
     try:
-        for msg in inport:
-            print(f"[DEBUG] pad pressed: {msg}")
+        for msg in inport.iter_pending():
+            # Room select (CC)
             if msg.type == "control_change":
-                print(f"[DEBUG] switch room to CC={msg.control}")
-                switch_room(msg.control)
+                for r in rooms:
+                    if r["room_key"] == msg.control:
+                        active_room = r
+                        update_pads()
+
+            # Action trigger (NOTE)
             elif msg.type == "note_on" and msg.velocity > 0:
-                print(f"[DEBUG] note_on received: note={msg.note}")
                 states = get_states()
                 for act in active_room["actions"]:
-                    print(f"[DEBUG] checking action key={act['key']} entities={act['entity_ids']}")
-                    if msg.note != act["key"]:
-                        continue
-                    print(f"[DEBUG] matched action: {act}")
-                    ids = act["entity_ids"]
-                    dom = ids[0].split(".")[0]
+                    if msg.note == act["key"]:
+                        ids = act["entity_ids"]
+                        dom = ids[0].split(".")[0]
 
-                    if "service" in act:
-                        call_ha(dom, act["service"], act["service_data"])
-                    elif dom == "climate":
-                        eid, st = ids[0], states.get(ids[0],{}).get("state","")
-                        svc = "turn_off" if st=="cool" else "set_hvac_mode"
-                        data = {"entity_id": eid} if svc=="turn_off" else {"entity_id": eid, "hvac_mode": "cool"}
-                        call_ha("climate", svc, data)
-                    elif "brightness" in act:
-                        for e in ids:
-                            call_ha(dom, "turn_on", {"entity_id": e, "brightness": act["brightness"]})
-                    else:
                         if len(ids) > 1:
                             svc = "turn_off" if is_on(ids, states) else "turn_on"
                             for e in ids:
@@ -227,10 +249,12 @@ while True:
                         else:
                             call_ha(dom, "toggle", {"entity_id": ids[0]})
 
-                    time.sleep(0.1)
-                    update_pads()
-                    break
+                        update_pads()
+
+        time.sleep(0.01)
+
     except Exception as e:
-        print("❌ MIDI error, reconnecting…", e)
+        print("❌ MIDI error:", e)
         inport = outport = None
-        time.sleep(1)
+        open_ports()
+        update_pads()

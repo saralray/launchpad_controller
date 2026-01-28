@@ -1,7 +1,7 @@
 import mido
 
 # Auto-detect input port for Launchpad Mini MK3
-input_port = next((p for p in mido.get_input_names() if "MIDIIN2" in p), None)
+input_port = next((p for p in mido.get_input_names() if "Launchpad Mini MK3" in p), None)
 
 if not input_port:
     print("❌ Launchpad Mini Mk3 input port not found.")

@@ -48,7 +48,8 @@
         { "key": 66, "entity_ids": ["light.workshop_ceiling_light_2"], "on_color": 21, "off_color": 5 },
         { "key": 67, "entity_ids": ["light.workshop_ceiling_light_3"], "on_color": 21, "off_color": 5 },
         { "key": 64, "entity_ids": ["light.workshop_ceiling_light_1","light.workshop_ceiling_light_2","light.workshop_ceiling_light_3"], "on_color": 21, "off_color": 5 },
-        { "key": 36, "entity_ids": ["switch.air_compressor"], "on_color": 33, "off_color": 9 }
+        { "key": 36, "entity_ids": ["switch.air_compressor"], "on_color": 33, "off_color": 9 },
+        { "key": 37, "entity_ids": ["fan.workshop_blower_fan"], "on_color": 33, "off_color": 9 }
       ]
     }
   ]

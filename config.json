@@ -1,0 +1,55 @@
+{
+  "rooms": [
+    {
+      "name": "Co-working Space",
+      "room_key": 89,
+      "room_key_color_on": 21,
+      "room_key_color_any_on": 9,
+      "room_key_color_off": 5,
+      "actions": [
+        { "key": 65, "entity_ids": ["light.co_working_space_ceiling_light_1"], "on_color": 21, "off_color": 5 },
+        { "key": 66, "entity_ids": ["light.co_working_space_ceiling_light_2"], "on_color": 21, "off_color": 5 },
+        { "key": 67, "entity_ids": ["light.co_working_space_ceiling_light_3"], "on_color": 21, "off_color": 5 },
+        { "key": 64, "entity_ids": ["light.co_working_space_ceiling_light_1", "light.co_working_space_ceiling_light_2", "light.co_working_space_ceiling_light_3"], "on_color": 21, "off_color": 9 },
+        { "key":  56,"entity_ids":["light.sign_light","light.uplight_1","light.uplight_2","light.uplight_3"],"service_data":{"entity_id":["light.sign_light","light.uplight_1","light.uplight_2","light.uplight_3"],"effect":"Rainbow"},"on_color":21,"off_color":5},
+        { "key": 60, "entity_ids": ["light.soldering_table_light_1", "light.soldering_table_light_2", "light.soldering_table_light_3", "light.soldering_table_light_4"], "on_color": 21, "off_color": 9 },
+        { "key": 61, "entity_ids": ["light.soldering_table_light_1"], "on_color": 21, "off_color": 5 },
+        { "key": 62, "entity_ids": ["light.soldering_table_light_2"], "on_color": 21, "off_color": 5 },
+        { "key": 63, "entity_ids": ["light.soldering_table_light_3"], "on_color": 21, "off_color": 5 },
+        { "key": 92, "entity_ids": ["light.soldering_table_light_4"], "on_color": 21, "off_color": 5 },
+        { "key": 36, "entity_ids": ["switch.projector_switch"], "on_color": 33, "off_color": 9 },
+        { "key": 37, "entity_ids": ["switch.amplifier_switch"], "on_color": 33, "off_color": 9 },
+        { "key": 99, "entity_ids": ["climate.co_working_space_ac"], "on_color": 54, "off_color": 1 }
+      ]
+    },
+    {
+      "name": "AI Room",
+      "room_key": 79,
+      "room_key_color_on": 21,
+      "room_key_color_any_on": 9,
+      "room_key_color_off": 5,
+      "actions": [
+        { "key": 65, "entity_ids": ["light.ai_room_ceiling_light_1"], "on_color": 21, "off_color": 5 },
+        { "key": 66, "entity_ids": ["light.ai_room_ceiling_light_2"], "on_color": 21, "off_color": 5 },
+        { "key": 67, "entity_ids": ["light.ai_room_ceiling_light_3"], "on_color": 21, "off_color": 5 },
+        { "key": 96, "entity_ids": ["light.ai_room_ceiling_light_4"], "on_color": 21, "off_color": 5 },
+        { "key": 64, "entity_ids": ["light.ai_room_ceiling_light_1", "light.ai_room_ceiling_light_2", "light.ai_room_ceiling_light_3", "light.ai_room_ceiling_light_4"], "on_color": 21, "off_color": 13 },
+        { "key": 99, "entity_ids": ["climate.ai_room_ac"], "on_color": 54, "off_color": 1 }
+      ]
+    },
+    {
+      "name": "Workshop Room",
+      "room_key": 69,
+      "room_key_color_on": 21,
+      "room_key_color_any_on": 9,
+      "room_key_color_off": 5,
+      "actions": [
+        { "key": 65, "entity_ids": ["light.workshop_ceiling_light_1"], "on_color": 21, "off_color": 5 },
+        { "key": 66, "entity_ids": ["light.workshop_ceiling_light_2"], "on_color": 21, "off_color": 5 },
+        { "key": 67, "entity_ids": ["light.workshop_ceiling_light_3"], "on_color": 21, "off_color": 5 },
+        { "key": 64, "entity_ids": ["light.workshop_ceiling_light_1","light.workshop_ceiling_light_2","light.workshop_ceiling_light_3"], "on_color": 21, "off_color": 5 },
+        { "key": 36, "entity_ids": ["switch.air_compressor"], "on_color": 33, "off_color": 9 }
+      ]
+    }
+  ]
+}

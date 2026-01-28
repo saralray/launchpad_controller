@@ -51,6 +51,34 @@
         { "key": 36, "entity_ids": ["switch.air_compressor"], "on_color": 33, "off_color": 9 },
         { "key": 37, "entity_ids": ["fan.workshop_blower_fan"], "on_color": 33, "off_color": 9 }
       ]
+    },
+    {
+      "name": "Presets",
+      "room_key": 29,
+      "room_key_color_on": 21,
+      "room_key_color_any_on": 13,
+      "room_key_color_off": 5,
+      "actions": [
+        {
+          "key": 36,
+          "preset": "all_toggle",
+          "on_color": 21,
+          "off_color": 0
+        },
+        {
+          "key": 37,
+          "preset": "wave",
+          "on_color": 9,
+          "off_color": 5
+        },
+        {
+          "key": 38,
+          "preset": "chaos",
+          "on_color": 5,
+          "off_color": 1
+        }
+      ]
     }
+
   ]
 }

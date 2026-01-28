@@ -5,7 +5,7 @@ set -e
 # CONFIG
 # ======================================================
 APP_NAME="launchpad_controller"
-USER_NAME="saral"
+USER_NAME="${SUDO_USER:-$(logname)}"
 
 SRC_DIR="$(pwd)"
 DEST_DIR="/opt/${APP_NAME}"

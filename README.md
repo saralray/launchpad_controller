@@ -26,11 +26,18 @@ Designed for **USB re-plug safety**, **systemd**, and **real-world reliability**
 
 ```
 launchpad_controller/
-├── controller.py
+├── controller.py          # entry shim → launchpad.app:main
+├── launchpad/             # package
+│   ├── app.py             # Controller + main loop
+│   ├── config.py          # typed config model (dataclasses)
+│   ├── ha_client.py       # HAClient: state cache, REST, WebSocket
+│   ├── midi.py            # MidiSurface: ports + LED output
+│   └── presets_api.py     # PresetHA façade for presets
+├── presets/               # run(ha) modules (all_toggle, wave, chaos)
 ├── config.json
 ├── requirements.txt
-├── install.sh
-├── .env.example
+├── install-ubuntu.sh
+├── install-fedora.sh
 └── README.md
 ```
 

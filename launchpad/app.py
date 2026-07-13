@@ -9,18 +9,16 @@ rate-limited pad repaints.
 from __future__ import annotations
 
 import importlib
-import os
 import signal
 import sys
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from .config import Config, Room, load_config
 from .ha_client import HAClient
 from .midi import MidiSurface
 from .presets_api import PresetHA
+from .settings import get_credentials, programmer_mode
 
 # entity states that count as "lit" for LED purposes
 ON_STATES = ("on", "cool")
@@ -40,6 +38,13 @@ class Controller:
         self.active_room: Room = config.rooms[0]
         self.preset_ha = PresetHA(ha)
         self._last_update = 0.0
+        self.programmer = programmer_mode()
+
+    def _apply_layout(self) -> None:
+        # put the device into 'User'/Programmer layout so its note/CC numbers
+        # match config.json + the app grid, every time it (re)connects
+        if self.programmer:
+            self.midi.set_programmer_mode(True)
 
     # ---- LED painting --------------------------------------------------
 
@@ -118,6 +123,7 @@ class Controller:
 
     def run(self) -> None:
         self.midi.open()
+        self._apply_layout()
         self.ha.refresh_states(force=True)
         self.ha.start_ws(self.update_pads)
 
@@ -127,6 +133,7 @@ class Controller:
         while True:
             if not self.midi.still_present():
                 self.midi.open()
+                self._apply_layout()
                 self.update_pads()
 
             for msg in self.midi.iter_pending():
@@ -136,9 +143,8 @@ class Controller:
 
 
 def main() -> None:
-    load_dotenv()
-
-    ha = HAClient(os.getenv("HASS_URL"), os.getenv("HASS_TOKEN"))
+    url, token = get_credentials()
+    ha = HAClient(url, token)
     midi = MidiSurface()
     controller = Controller(load_config(CONFIG_PATH), ha, midi)
 

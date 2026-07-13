@@ -34,8 +34,10 @@ launchpad_controller/
 │   ├── midi.py            # MidiSurface: ports + LED output
 │   ├── presets_api.py     # PresetHA façade for presets
 │   ├── manage.py          # Tkinter macro editor (python -m launchpad.manage)
-│   └── palette.py         # velocity → RGB for GUI swatches
+│   ├── palette.py         # velocity → RGB for GUI swatches
+│   └── settings.py        # HA credentials store (settings.json / .env)
 ├── presets/               # run(ha) modules (all_toggle, wave, chaos)
+├── assets/launchpad.svg   # app icon for the desktop launcher
 ├── config.json
 ├── requirements.txt
 ├── install-ubuntu.sh
@@ -45,17 +47,28 @@ launchpad_controller/
 
 ---
 
-## 🔐 Environment Variables
+## 🔐 Home Assistant connection
 
-Create `.env` (do NOT commit):
+Configure it **in the app** — open the Macro Manager, click **Connection**,
+enter your server URL and a long-lived access token, then **Test** and
+**Save**. Stored in `settings.json` (chmod 600, git-ignored). No `.env` needed.
+
+Credentials resolve in this order:
+
+```
+settings.json   ->   .env / environment   (fallback, optional)
+```
+
+A `.env` still works if you prefer it:
 
 ```
 HASS_URL=https://homeassistant.local:8123
 HASS_TOKEN=LONG_LIVED_ACCESS_TOKEN
 ```
 
-If `.env` is missing, the controller runs in **PASSIVE MODE**
-(no Home Assistant calls).
+With neither set, the controller runs in **PASSIVE MODE** (no Home Assistant
+calls; LEDs still driven from local state). Restart the daemon after changing
+the connection so it picks up the new credentials.
 
 ---
 
@@ -120,12 +133,18 @@ python keychecker.py
 
 ## 🖥️ Macro Manager (GUI)
 
-Edit rooms, macros, and colors without hand-editing `config.json`:
+Edit rooms, macros, and colors without hand-editing `config.json`.
+
+After running the install script it appears in your **applications menu** as
+**Launchpad Macro Manager** — just click it. Or run it directly:
 
 ```
-sudo systemctl stop launchpad_controller   # free the MIDI port
+sudo systemctl stop launchpad_controller   # only needed for Learn / color Test
 python -m launchpad.manage
 ```
+
+The window opens even with no Launchpad connected (editing and saving work
+offline; Learn and live color Test need the device).
 
 - **9x9 grid preview** of the selected room.
 - **Learn mode** — click *Learn*, press a physical Launchpad button, its

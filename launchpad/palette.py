@@ -39,3 +39,18 @@ def rgb(velocity: int) -> tuple[int, int, int]:
 def hex_color(velocity: int) -> str:
     r, g, b = rgb(velocity)
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def to_hex(rgb_tuple: tuple[int, int, int]) -> str:
+    r, g, b = rgb_tuple
+    return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+
+
+def mix(fg: tuple[int, int, int], bg: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    """Blend fg toward bg by t in [0,1] (t=0 -> fg, t=1 -> bg)."""
+    return tuple(int(f + (b - f) * t) for f, b in zip(fg, bg))  # type: ignore
+
+
+def hex_mix(velocity: int, bg_hex: str, t: float) -> str:
+    bg = tuple(int(bg_hex[i : i + 2], 16) for i in (1, 3, 5))
+    return to_hex(mix(rgb(velocity), bg, t))  # type: ignore

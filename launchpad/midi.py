@@ -8,6 +8,8 @@ import time
 
 import mido
 
+from . import device
+
 
 class MidiSurface:
     def __init__(self):
@@ -49,6 +51,15 @@ class MidiSurface:
 
     def iter_pending(self):
         return self.inport.iter_pending() if self.inport else iter(())
+
+    def set_programmer_mode(self, on: bool = True) -> None:
+        """Select the Launchpad's Programmer ('User') layout. Best-effort."""
+        if not self.outport:
+            return
+        try:
+            self.outport.send(mido.Message("sysex", data=device.layout_sysex(on)))
+        except Exception:
+            pass
 
     def set_pad(self, key: int, val: int, is_cc: bool) -> None:
         if not self.outport:

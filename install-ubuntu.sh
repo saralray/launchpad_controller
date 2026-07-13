@@ -16,6 +16,10 @@ VENV_DIR="${DEST_DIR}/venv"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 UDEV_RULE="/etc/udev/rules.d/99-${APP_NAME}.rules"
 
+DESKTOP_ID="launchpad-macro-manager"
+DESKTOP_FILE="/usr/share/applications/${DESKTOP_ID}.desktop"
+ICON_PATH="${DEST_DIR}/assets/launchpad.svg"
+
 PYTHON_BIN="/usr/bin/python3"
 
 # Launchpad vendor/product
@@ -38,6 +42,7 @@ systemctl reset-failed ${APP_NAME}.service 2>/dev/null || true
 
 rm -f "$SERVICE_FILE"
 rm -f "$UDEV_RULE"
+rm -f "$DESKTOP_FILE"
 rm -rf "$DEST_DIR"
 
 systemctl daemon-reload
@@ -150,9 +155,31 @@ systemctl daemon-reload
 udevadm control --reload-rules
 udevadm trigger
 
+# ======================================================
+# DESKTOP ENTRY (app-menu launcher for the macro manager GUI)
+# ======================================================
+echo "🖼  Creating desktop launcher"
+
+cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Launchpad Macro Manager
+Comment=Edit Launchpad macros, rooms and colors
+Exec=${VENV_DIR}/bin/python -m launchpad.manage
+Path=${DEST_DIR}
+Icon=${ICON_PATH}
+Terminal=false
+Categories=Utility;
+Keywords=launchpad;midi;macro;home assistant;
+EOF
+
+chmod 644 "$DESKTOP_FILE"
+update-desktop-database /usr/share/applications 2>/dev/null || true
+
 echo ""
 echo "✅ Installation complete (Ubuntu)"
 echo "👉 Plug Launchpad → service starts"
 echo "👉 Unplug → service keeps running (idle)"
 echo "👉 Replug → reconnects automatically"
 echo "👉 Logs: journalctl -u ${APP_NAME} -f"
+echo "👉 Edit macros: open 'Launchpad Macro Manager' from your app menu"

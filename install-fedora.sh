@@ -48,6 +48,7 @@ echo "📦 Installing system dependencies..."
 dnf install -y \
   python3 \
   python3-devel \
+  python3-tkinter \
   gcc gcc-c++ \
   alsa-lib-devel \
   pkgconf-pkg-config \

@@ -29,10 +29,12 @@ launchpad_controller/
 ├── controller.py          # entry shim → launchpad.app:main
 ├── launchpad/             # package
 │   ├── app.py             # Controller + main loop
-│   ├── config.py          # typed config model (dataclasses)
+│   ├── config.py          # typed config model (dataclasses) + save
 │   ├── ha_client.py       # HAClient: state cache, REST, WebSocket
 │   ├── midi.py            # MidiSurface: ports + LED output
-│   └── presets_api.py     # PresetHA façade for presets
+│   ├── presets_api.py     # PresetHA façade for presets
+│   ├── manage.py          # Tkinter macro editor (python -m launchpad.manage)
+│   └── palette.py         # velocity → RGB for GUI swatches
 ├── presets/               # run(ha) modules (all_toggle, wave, chaos)
 ├── config.json
 ├── requirements.txt
@@ -113,6 +115,31 @@ python keychecker.py
 |-------------|--------------------|
 | note_on note=X | actions[].key |
 | control_change control=X | room_key |
+
+---
+
+## 🖥️ Macro Manager (GUI)
+
+Edit rooms, macros, and colors without hand-editing `config.json`:
+
+```
+sudo systemctl stop launchpad_controller   # free the MIDI port
+python -m launchpad.manage
+```
+
+- **9x9 grid preview** of the selected room.
+- **Learn mode** — click *Learn*, press a physical Launchpad button, its
+  note/CC number is captured automatically (built-in key checker).
+- **Entity picker** — Home Assistant entities are fetched via `.env`
+  (free-text entry in passive mode).
+- **Color test** — preview a color live on the device.
+
+Needs Tkinter: `sudo apt install python3-tk`. Saves to `config.json` on disk —
+restart the daemon to apply:
+
+```
+sudo systemctl restart launchpad_controller
+```
 
 ---
 

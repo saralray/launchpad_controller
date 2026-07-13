@@ -11,8 +11,11 @@ Linux MIDI daemon. Bridges Novation Launchpad Mini MK3 to Home Assistant. Single
 ```bash
 pip install -r requirements.txt
 python controller.py          # main daemon (needs Launchpad plugged in)
-python keychecker.py          # discover note/CC numbers for a physical button — run this first when editing config.json
+python -m launchpad.manage    # GUI to edit config.json macros (Tkinter; stop the daemon first so it can hold the MIDI port)
+python keychecker.py          # raw note/CC printer — the manage app's Learn mode supersedes this for editing config.json
 ```
+
+The manage GUI needs Tkinter (`sudo apt install python3-tk` on Ubuntu; stdlib but not always packaged). It edits `config.json` on disk only — restart the daemon to apply.
 
 No test suite, no linter config, no package manager beyond pip. Deploy is via install script, not CI:
 
@@ -34,6 +37,10 @@ Package layout:
 - **`launchpad/midi.py`** — `MidiSurface`: port discovery, hot-plug detection, LED output. `open()` blocks/retries until both Launchpad in/out ports appear; never lets exceptions escape.
 - **`launchpad/presets_api.py`** — `PresetHA`, the façade handed to preset `run(ha)`. Exposes exactly `all_lights` / `is_on` / `turn_on` / `turn_off`; presets talk only to this, never to `HAClient` or the cache directly.
 - **`launchpad/app.py`** — `Controller` owns runtime state and the event loop, plus `main()` (env load, wiring, signal handlers).
+- **`launchpad/config.py` serialization** — `Action.to_dict` / `Room.to_dict` / `Config.to_dict` + `save_config()` write the model back to `config.json`. Used by the manage GUI; round-trip preserves `service_data`, colors, and `room_key_color_on`.
+- **`launchpad/manage.py`** — Tkinter macro editor (`python -m launchpad.manage`). Left: rooms list; middle: 9x9 grid preview + Unplaced-actions list; right: macro editor (pad number, entity/preset type, entity picker, on/off colors). `MidiBridge` opens the Launchpad input in a thread for **Learn mode** (press a physical pad → its note/CC fills the focused field) and the output for live color preview — so the daemon must be stopped first (one process per port). Entities are fetched via `HAClient` using `.env`, falling back to free-text in passive mode. Edits touch `config.json` on disk only; the running daemon must be restarted to pick them up.
+- **`launchpad/palette.py`** — coarse velocity→RGB approximation for GUI swatches only; exact color is previewed on the device.
+- **Grid geometry** (`manage.cell_for_number`): standard Mini MK3 X-Y layout — top CC row 91-99, right scene column 19-89, main 8x8 notes 11-88 (tens=row-from-bottom, ones=column). Injective across the 81 cells. Numbers off this grid (e.g. the shipped config's note 60/90) can't be placed and appear in the Unplaced list, still fully editable.
 
 Behavior notes:
 

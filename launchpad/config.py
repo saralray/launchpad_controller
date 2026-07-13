@@ -37,6 +37,18 @@ class Action:
             service_data=d.get("service_data"),
         )
 
+    def to_dict(self) -> dict:
+        d: dict = {"key": self.key}
+        if self.entity_ids is not None:
+            d["entity_ids"] = self.entity_ids
+        if self.preset is not None:
+            d["preset"] = self.preset
+        if self.service_data is not None:
+            d["service_data"] = self.service_data
+        d["on_color"] = self.on_color
+        d["off_color"] = self.off_color
+        return d
+
 
 @dataclass
 class Room:
@@ -58,13 +70,32 @@ class Room:
             room_key_color_on=d.get("room_key_color_on", 21),
         )
 
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "room_key": self.room_key,
+            "room_key_color_on": self.room_key_color_on,
+            "room_key_color_any_on": self.room_key_color_any_on,
+            "room_key_color_off": self.room_key_color_off,
+            "actions": [a.to_dict() for a in self.actions],
+        }
+
 
 @dataclass
 class Config:
     rooms: list[Room]
+
+    def to_dict(self) -> dict:
+        return {"rooms": [r.to_dict() for r in self.rooms]}
 
 
 def load_config(path: str | Path) -> Config:
     with open(path) as f:
         data = json.load(f)
     return Config(rooms=[Room.from_dict(r) for r in data["rooms"]])
+
+
+def save_config(config: Config, path: str | Path) -> None:
+    with open(path, "w") as f:
+        json.dump(config.to_dict(), f, indent=2)
+        f.write("\n")

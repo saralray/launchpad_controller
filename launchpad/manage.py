@@ -35,8 +35,18 @@ try:
 except Exception:  # pragma: no cover - optional at edit time
     mido = None
 
-import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+try:
+    import tkinter as tk
+    from tkinter import messagebox, simpledialog, ttk
+except ImportError:
+    raise SystemExit(
+        "Tkinter is required for the manage GUI but is not installed.\n"
+        "  Ubuntu/Debian:  sudo apt install python3-tk\n"
+        "  Fedora:         sudo dnf install python3-tkinter\n"
+        "A venv built before installing it picks it up automatically once "
+        "the system package is present (re-run the installer to rebuild the "
+        "service venv)."
+    )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config.json"

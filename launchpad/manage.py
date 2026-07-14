@@ -52,6 +52,7 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 PRESETS_DIR = PROJECT_ROOT / "presets"
+ICON_PATH = PROJECT_ROOT / "assets" / "launchpad.png"
 
 GRID = 9  # 9x9 launchpad
 
@@ -272,6 +273,7 @@ class ManageApp(tk.Tk):
         self.geometry("1200x780")
         self.configure(bg=CHASSIS)
         self.minsize(1040, 680)
+        self._set_app_icon()
 
         self.config_model: Config = load_config(CONFIG_PATH)
         self.midi = MidiBridge()
@@ -287,6 +289,14 @@ class ManageApp(tk.Tk):
         self._poll_midi()
         self._connect_async()  # probe MIDI without blocking the window
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _set_app_icon(self) -> None:
+        # Tk 8.6 reads PNG natively; keep a ref so it isn't garbage-collected.
+        try:
+            self._icon_img = tk.PhotoImage(file=str(ICON_PATH))
+            self.iconphoto(True, self._icon_img)
+        except Exception:
+            pass  # missing/unsupported icon must never block the GUI
 
     # ---- theming -------------------------------------------------------
 

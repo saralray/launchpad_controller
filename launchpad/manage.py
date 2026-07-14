@@ -381,8 +381,10 @@ class ManageApp(tk.Tk):
                    command=self._save).pack(side="right")
         ttk.Button(actions, text="Download JSON", style="Ghost.TButton",
                    command=self._export).pack(side="right", padx=(8, 0))
+        ttk.Button(actions, text="Import JSON", style="Ghost.TButton",
+                   command=self._import).pack(side="right", padx=(8, 0))
         ttk.Button(actions, text="Reload", style="Ghost.TButton",
-                   command=self._reload).pack(side="right", padx=8)
+                   command=self._reload).pack(side="right", padx=(8, 0))
         ttk.Button(actions, text="Connection", style="Ghost.TButton",
                    command=self._open_connection).pack(side="right")
 
@@ -1105,6 +1107,24 @@ class ManageApp(tk.Tk):
             messagebox.showerror("Download failed", str(e))
             return
         messagebox.showinfo("Downloaded", f"Config written to:\n{path}")
+
+    def _import(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Import config from JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            rooms = [Room.from_dict(r) for r in data.get("rooms", [])]
+            self.config_model = Config(rooms=rooms)
+            self._refresh_rooms()
+            messagebox.showinfo("Imported", f"Successfully imported config from:\n{path}\n\nClick 'Save config' to apply.")
+        except Exception as e:
+            messagebox.showerror("Import failed", f"Error parsing config: {e}")
 
     def _reload(self) -> None:
         self.config_model = load_config(CONFIG_PATH)

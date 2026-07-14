@@ -89,13 +89,48 @@ class Config:
         return {"rooms": [r.to_dict() for r in self.rooms]}
 
 
+def default_config() -> Config:
+    return Config(
+        rooms=[
+            Room(
+                name="Default Room",
+                room_key=89,
+                room_key_color_on=21,
+                room_key_color_any_on=9,
+                room_key_color_off=5,
+                actions=[],
+            )
+        ]
+    )
+
+
 def load_config(path: str | Path) -> Config:
-    with open(path) as f:
-        data = json.load(f)
-    return Config(rooms=[Room.from_dict(r) for r in data["rooms"]])
+    path = Path(path)
+    if not path.exists() or path.stat().st_size == 0:
+        cfg = default_config()
+        try:
+            save_config(cfg, path)
+        except Exception:
+            pass
+        return cfg
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        rooms = [Room.from_dict(r) for r in data.get("rooms", [])]
+        if not rooms:
+            return default_config()
+        return Config(rooms=rooms)
+    except Exception:
+        cfg = default_config()
+        try:
+            save_config(cfg, path)
+        except Exception:
+            pass
+        return cfg
 
 
 def save_config(config: Config, path: str | Path) -> None:
     with open(path, "w") as f:
         json.dump(config.to_dict(), f, indent=2)
         f.write("\n")
+

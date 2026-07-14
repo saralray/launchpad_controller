@@ -352,6 +352,16 @@ button {
   font-weight: 700;
   letter-spacing: -0.3px;
 }
+.grid-head .brand-logo {
+  display: block;
+  opacity: 0.85;
+}
+.grid-head .brand-word {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--ink-soft);
+}
 
 .deck {
   padding: 16px;

@@ -1,6 +1,7 @@
 import { GRID, cellForNumber, isRound } from "../lib/layout.js";
 import { rgb, mix, toHex, lum } from "../lib/palette.js";
 import { actionLabel } from "../lib/config.js";
+import NovationLogo from "./NovationLogo.jsx";
 
 // A lit pad glows its velocity color with a soft halo, exactly like the device.
 function padStyle(velocity) {
@@ -97,6 +98,7 @@ export default function PadGrid({ room, model, ha, selectedActionId, onSelectAct
         <button className="btn ghost" disabled title="Map layout needs a connected Launchpad">
           Map layout
         </button>
+        <NovationLogo height={16} />
       </div>
 
       <div className="deck">

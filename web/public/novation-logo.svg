@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 40" width="210" height="40" role="img" aria-label="novation">
+  <!-- Placeholder recreation of the Novation wordmark. Replace this file with
+       the official Novation logo (keep the same filename) to use the real asset;
+       the app and its layout pick it up automatically. -->
+  <text x="0" y="30" font-family="Inter, 'Helvetica Neue', Arial, sans-serif"
+        font-size="34" font-weight="800" letter-spacing="-1.4" fill="#C3CAD6">novation</text>
+</svg>

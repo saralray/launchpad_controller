@@ -1,11 +1,25 @@
-"""Grid geometry for the Launchpad Mini MK3.
+"""Grid layout map: which button sits at which (row, col) position.
 
-Maps note/CC numbers to (row, col) cells using the documented X-Y layout,
-with an optional per-unit calibration overlay recorded by the manage GUI's
-"Map layout" wizard (persisted to layout.json).
+A "button" is identified by its MIDI *event*, not just a number: the same
+numeric value can arrive as both a note_on and a control_change from two
+different physical buttons (e.g. a scene-column button vs a main pad on
+some layouts). So the map is keyed on `(is_cc, number)`, never number
+alone.
 
-NOTE: this file is a local reconstruction to make the package importable for
-development/testing. It matches the API manage.py relies on.
+The Mini MK3 *should* follow the documented X-Y layout (see `default_*`
+below), but the actual events a unit emits depend on its layout mode
+(Live vs Programmer) and firmware. Rather than trust the formula, the
+manage GUI can run a calibration wizard: press each physical button, its
+event is recorded against its grid position, and the result is persisted
+to layout.json next to config.json.
+
+Storage format (layout.json):
+    {"cells": {"1,0": {"n": 81, "cc": false}, ...}}   # "row,col" -> event
+
+Learned cells override the formula; cells left uncalibrated fall back to
+it, so a partial map (e.g. only the 8x8 grid, leaving the top bar alone)
+still places everything. An empty `Layout` is pure formula, so the app
+works out of the box without any calibration.
 """
 
 from __future__ import annotations
@@ -13,69 +27,113 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-GRID = 9
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAYOUT_PATH = PROJECT_ROOT / "layout.json"
 
+GRID = 9
 
-def _formula_cell(number: int, is_cc: bool):
-    n = int(number)
-    if is_cc:
-        if 91 <= n <= 99:
-            return (0, n - 91)
-        return None
-    tens, ones = divmod(n, 10)
-    if 1 <= tens <= 8 and 1 <= ones <= 8:
-        return (9 - tens, ones - 1)
-    if 1 <= tens <= 8 and ones == 9:
-        return (9 - tens, 8)
+# an event is (is_cc, number): control_change vs note_on, plus the number
+Event = tuple[bool, int]
+
+
+def default_key_for_cell(r: int, c: int) -> Event | None:
+    """Documented Mini MK3 X-Y layout: the (is_cc, number) at a cell.
+
+    Top row = CC 91-99. Main 8x8 + right scene column = note_on
+    (11-88 tens=row-from-bottom/ones=column; scene column ones=9, 19..89).
+    """
+    if r == 0 and 0 <= c <= 8:
+        return (True, 91 + c)  # top CC row
+    if 1 <= r <= 8 and c == 8:
+        return (False, (9 - r) * 10 + 9)  # right scene column (note)
+    if 1 <= r <= 8 and 0 <= c <= 7:
+        return (False, (9 - r) * 10 + (c + 1))  # main grid (note)
     return None
 
 
-def _formula_number(r: int, c: int):
-    if r == 0:
-        return (91 + c, True)
-    if c == 8:
-        return ((9 - r) * 10 + 9, False)
-    return ((9 - r) * 10 + (c + 1), False)
+def default_cell_for_key(is_cc: bool, number: int) -> tuple[int, int] | None:
+    for r in range(GRID):
+        for c in range(GRID):
+            if default_key_for_cell(r, c) == (is_cc, number):
+                return (r, c)
+    return None
 
 
 class Layout:
-    def __init__(self, cells: dict | None = None):
-        # {(r, c): (is_cc, number)} calibration overlay
-        self._cells: dict[tuple[int, int], tuple[bool, int]] = dict(cells or {})
+    """Bidirectional position<->event map with a formula fallback."""
 
-    def as_dict(self) -> dict[tuple[int, int], tuple[bool, int]]:
-        return dict(self._cells)
+    def __init__(self, cells: dict[tuple[int, int], Event] | None = None):
+        self._cell_to_key: dict[tuple[int, int], Event] = dict(cells or {})
+        self._key_to_cell: dict[Event, tuple[int, int]] = {
+            k: rc for rc, k in self._cell_to_key.items()
+        }
+
+    @property
+    def calibrated(self) -> bool:
+        return bool(self._cell_to_key)
+
+    def cell_for_number(self, number: int, is_cc: bool = False) -> tuple[int, int] | None:
+        key = (is_cc, number)
+        if key in self._key_to_cell:
+            return self._key_to_cell[key]
+        cell = default_cell_for_key(is_cc, number)
+        if cell in self._cell_to_key:  # position was reassigned by calibration
+            return None
+        return cell
+
+    def number_for_cell(self, r: int, c: int) -> int | None:
+        if (r, c) in self._cell_to_key:
+            return self._cell_to_key[(r, c)][1]
+        key = default_key_for_cell(r, c)
+        if key is None or key in self._key_to_cell:  # learned elsewhere
+            return None
+        return key[1]
+
+    def key_for_cell(self, r: int, c: int) -> Event | None:
+        if (r, c) in self._cell_to_key:
+            return self._cell_to_key[(r, c)]
+        return default_key_for_cell(r, c)
 
     def set_cell(self, r: int, c: int, number: int, is_cc: bool) -> None:
-        self._cells[(r, c)] = (bool(is_cc), int(number))
+        # an event lives in exactly one position; drop any stale mapping
+        key = (is_cc, number)
+        old_cell = self._key_to_cell.pop(key, None)
+        if old_cell is not None:
+            self._cell_to_key.pop(old_cell, None)
+        old_key = self._cell_to_key.get((r, c))
+        if old_key is not None:
+            self._key_to_cell.pop(old_key, None)
+        self._cell_to_key[(r, c)] = key
+        self._key_to_cell[key] = (r, c)
 
-    def cell_for_number(self, number: int, is_cc: bool = False):
-        for (r, c), (cc, num) in self._cells.items():
-            if num == int(number) and bool(cc) == bool(is_cc):
-                return (r, c)
-        return _formula_cell(number, is_cc)
-
-    def number_for_cell(self, r: int, c: int):
-        if (r, c) in self._cells:
-            return self._cells[(r, c)][1]
-        res = _formula_number(r, c)
-        return res[0] if res else None
+    def as_dict(self) -> dict[tuple[int, int], Event]:
+        return dict(self._cell_to_key)
 
 
-def load_layout() -> Layout:
+def load_layout(path: Path = LAYOUT_PATH) -> Layout:
     try:
-        raw = json.loads(LAYOUT_PATH.read_text())
-        cells = {}
-        for k, v in raw.items():
-            r, c = (int(x) for x in k.split(","))
-            cells[(r, c)] = (bool(v[0]), int(v[1]))
-        return Layout(cells)
-    except Exception:
+        with open(path) as f:
+            raw = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
         return Layout()
+    cells: dict[tuple[int, int], Event] = {}
+    for key, val in (raw.get("cells") or {}).items():
+        try:
+            r, c = (int(x) for x in key.split(","))
+            if isinstance(val, dict):  # current format
+                cells[(r, c)] = (bool(val.get("cc", False)), int(val["n"]))
+            else:  # legacy: bare number meant note_on
+                cells[(r, c)] = (False, int(val))
+        except (ValueError, TypeError, KeyError):
+            continue
+    return Layout(cells)
 
 
-def save_layout(layout: Layout) -> None:
-    raw = {f"{r},{c}": [cc, num] for (r, c), (cc, num) in layout.as_dict().items()}
-    LAYOUT_PATH.write_text(json.dumps(raw, indent=2))
+def save_layout(layout: Layout, path: Path = LAYOUT_PATH) -> None:
+    cells = {
+        f"{r},{c}": {"n": num, "cc": is_cc}
+        for (r, c), (is_cc, num) in layout.as_dict().items()
+    }
+    with open(path, "w") as f:
+        json.dump({"cells": cells}, f, indent=2)
+        f.write("\n")

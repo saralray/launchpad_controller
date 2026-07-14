@@ -18,7 +18,7 @@ from .config import Config, Room, load_config
 from .ha_client import HAClient
 from .midi import MidiSurface
 from .presets_api import PresetHA
-from .settings import get_credentials, programmer_mode
+from .settings import get_credentials
 
 # entity states that count as "lit" for LED purposes
 ON_STATES = ("on", "cool")
@@ -38,14 +38,6 @@ class Controller:
         self.active_room: Room = config.rooms[0]
         self.preset_ha = PresetHA(ha)
         self._last_update = 0.0
-        self.programmer = programmer_mode()
-
-    def _apply_layout(self) -> None:
-        # force the device's layout so its note/CC numbers match config.json
-        # every time it (re)connects. config.json is authored for the Live
-        # layout (right-column room keys arrive as control_change there), so
-        # this actively resets a device left in Programmer by a prior run.
-        self.midi.set_programmer_mode(self.programmer)
 
     # ---- LED painting --------------------------------------------------
 
@@ -124,7 +116,6 @@ class Controller:
 
     def run(self) -> None:
         self.midi.open()
-        self._apply_layout()
         self.ha.refresh_states(force=True)
         self.ha.start_ws(self.update_pads)
 
@@ -134,7 +125,6 @@ class Controller:
         while True:
             if not self.midi.still_present():
                 self.midi.open()
-                self._apply_layout()
                 self.update_pads()
 
             for msg in self.midi.iter_pending():

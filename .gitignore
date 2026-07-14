@@ -2,3 +2,4 @@ launchpad_controller/
 __pycache__/
 .env
 settings.json
+layout.json

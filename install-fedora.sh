@@ -97,6 +97,31 @@ else
 fi
 
 # ======================================================
+# MIDI PORT CHECK (diagnostic)
+# ======================================================
+echo "🎹 Detecting Launchpad MIDI ports..."
+
+sudo -u ${USER_NAME} "$VENV_DIR/bin/python" - <<'PYEOF' || true
+import mido
+ins = mido.get_input_names()
+outs = mido.get_output_names()
+lp_in = [p for p in ins if "launchpad" in p.lower()]
+lp_out = [p for p in outs if "launchpad" in p.lower()]
+if not lp_in and not lp_out:
+    print("   ⚠️  No Launchpad ports found — plug it in, then the udev rule")
+    print("       will (re)start the service on connect.")
+else:
+    print("   Launchpad INPUT ports:")
+    for p in lp_in:
+        print(f"     • {p}")
+    print("   Launchpad OUTPUT ports:")
+    for p in lp_out:
+        print(f"     • {p}")
+    print("   The daemon uses the MIDI port (not DAW) for Programmer-mode")
+    print("   LEDs and button input.")
+PYEOF
+
+# ======================================================
 # SYSTEMD SERVICE (OPTION A)
 # ======================================================
 echo "⚙️ Creating systemd service"

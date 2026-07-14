@@ -24,11 +24,8 @@ class MidiSurface:
             ins = mido.get_input_names()
             outs = mido.get_output_names()
 
-            in_name = next(
-                (p for p in ins if "launchpad" in p.lower() and "da" in p.lower()),
-                None,
-            )
-            out_name = next((p for p in outs if "launchpad" in p.lower()), None)
+            in_name = device.pick_launchpad_port(ins)
+            out_name = device.pick_launchpad_port(outs)
 
             if in_name and out_name:
                 self.inport = mido.open_input(in_name)

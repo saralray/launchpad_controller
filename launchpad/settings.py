@@ -42,11 +42,15 @@ def save_settings(data: dict) -> None:
 def programmer_mode() -> bool:
     """Whether to put the Launchpad in Programmer layout on connect.
 
-    Defaults to False: config.json is authored for the Live layout (its
-    right-column room keys arrive as control_change only in Live), so the
-    daemon selects Live unless a settings.json opts into Programmer.
+    Defaults to True: config.json is authored for the Programmer ('User')
+    layout — that's the layout whose numbering is main grid 11-88 (note_on),
+    top row 91-99 and right scene column 89..19 (control_change), which is
+    exactly what config.json uses (grid notes, room keys CC 89/79/69/29). In
+    Live layout those LED/note numbers don't address the pads, so the surface
+    stays dark. Set "launchpad_programmer_mode": false in settings.json only
+    for a config authored against the Live layout.
     """
-    return bool(load_settings().get("launchpad_programmer_mode", False))
+    return bool(load_settings().get("launchpad_programmer_mode", True))
 
 
 def get_credentials() -> tuple[str | None, str | None]:

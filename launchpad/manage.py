@@ -72,24 +72,31 @@ GRID = 9  # 9x9 launchpad
 # matte-black body. Selection/focus is a plain white ring.
 # ======================================================================
 
-CHASSIS = "#0E0F13"
-CHASSIS_RGB = (14, 15, 19)
-PANEL = "#171A21"
-PANEL2 = "#1F232C"  # raised controls
-WELL = "#13161C"    # dark pad well / input field
+CHASSIS = "#0B0C10"
+CHASSIS_RGB = (11, 12, 16)
+PANEL = "#161922"
+PANEL2 = "#1F2430"  # raised controls
+WELL = "#0E1117"    # dark pad well / input field
+PAD_OFF = "#141821"  # unlit pad body
 BEZEL = "#2B323E"
-INK = "#E7EAF0"
-INK_DIM = "#828B9B"
+HAIR = "#242A35"    # panel hairline border
+INK = "#E9ECF3"
+INK_DIM = "#8792A4"
+INK_DIM2 = "#6E7686"  # eyebrows / faint labels
 SELECT = "#FFFFFF"
-LIVE = "#18D45B"    # "powered" green — save action + connected LED
+LIVE = "#22D866"    # "powered" green — save action + connected LED
+GREEN = "#3DD65F"
 AMBER = "#FFB020"
+DANGER = "#E26060"
 WHITE = (255, 255, 255)
 
 FONT_MONO = ("DejaVu Sans Mono", 10)
-FONT_PAD = ("DejaVu Sans Mono", 9)
+FONT_PAD = ("DejaVu Sans Mono", 9, "bold")
 FONT_EYE = ("DejaVu Sans", 8, "bold")
 FONT_BODY = ("DejaVu Sans", 10)
 FONT_H = ("DejaVu Sans", 13, "bold")
+FONT_TITLE = ("DejaVu Sans", 20, "bold")
+FONT_BRAND = ("DejaVu Sans", 14, "bold")
 
 
 def _lum(c: tuple[int, int, int]) -> float:
@@ -113,12 +120,21 @@ class PadGrid(tk.Canvas):
 
     def __init__(self, master, on_click):
         span = self.MARGIN * 2 + GRID * self.CELL + (GRID - 1) * self.GAP
+        self.span = span
         super().__init__(
-            master, width=span, height=span, bg=CHASSIS, highlightthickness=0, bd=0
+            master, width=span, height=span, bg=PANEL, highlightthickness=0, bd=0
         )
         self.on_click = on_click
         self._rects: dict[tuple[int, int], tuple[int, int, int, int]] = {}
         self.bind("<Button-1>", self._click)
+
+    def _round_rect(self, x0, y0, x1, y1, rad, **kw):
+        pts = [
+            x0 + rad, y0, x1 - rad, y0, x1, y0, x1, y0 + rad,
+            x1, y1 - rad, x1, y1, x1 - rad, y1, x0 + rad, y1,
+            x0, y1, x0, y1 - rad, x0, y0 + rad, x0, y0,
+        ]
+        return self.create_polygon(pts, smooth=True, **kw)
 
     def _box(self, r: int, c: int) -> tuple[int, int, int, int]:
         x0 = self.MARGIN + c * (self.CELL + self.GAP)
@@ -134,6 +150,9 @@ class PadGrid(tk.Canvas):
     def render(self, pads: dict, selected: tuple[int, int] | None) -> None:
         self.delete("all")
         self._rects = {}
+        # rounded deck backdrop so the grid reads as the device body
+        self._round_rect(4, 4, self.span - 4, self.span - 4, 20,
+                         fill="#0A0B0F", outline="#20252F", width=1)
         for r in range(GRID):
             for c in range(GRID):
                 self._rects[(r, c)] = self._box(r, c)
@@ -143,7 +162,7 @@ class PadGrid(tk.Canvas):
         # round function/scene buttons vs square grid pads — mirrors hardware
         if round_btn:
             return self.create_oval(x0, y0, x1, y1, **kw)
-        rad = 11
+        rad = 12
         pts = [
             x0 + rad, y0, x1 - rad, y0, x1, y0, x1, y0 + rad,
             x1, y1 - rad, x1, y1, x1 - rad, y1, x0 + rad, y1,
@@ -156,24 +175,32 @@ class PadGrid(tk.Canvas):
         round_btn = r == 0 or c == 8
         lit = info is not None and info[1] is not None
 
-        self._shape(x0, y0, x1, y1, round_btn, fill=WELL, outline=BEZEL, width=1)
-
         if lit:
             color = rgb(info[1])
-            halo = to_hex(mix(color, CHASSIS_RGB, 0.62))
-            self._shape(x0 - 3, y0 - 3, x1 + 3, y1 + 3, round_btn,
-                        fill="", outline=halo, width=3)
+            # soft glow: concentric rings fading from the pad color into the
+            # chassis, brightest nearest the pad — fakes a bloom in Tk canvas.
+            for off, t in ((8, 0.86), (6, 0.72), (4, 0.54), (2, 0.34)):
+                self._shape(x0 - off, y0 - off, x1 + off, y1 + off, round_btn,
+                            fill="", outline=to_hex(mix(color, CHASSIS_RGB, t)),
+                            width=2)
+            # core, with a lighter top edge to suggest a lit lens
             self._shape(x0, y0, x1, y1, round_btn, fill=to_hex(color),
-                        outline=to_hex(mix(color, WHITE, 0.3)), width=1)
+                        outline=to_hex(mix(color, WHITE, 0.45)), width=1)
+            self._shape(x0 + 3, y0 + 3, x1 - 3, y0 + 10, round_btn,
+                        fill="", outline=to_hex(mix(color, WHITE, 0.6)), width=1)
+        else:
+            # unlit pad: subtle raised chiclet that recedes into the deck
+            self._shape(x0, y0, x1, y1, round_btn, fill=PAD_OFF,
+                        outline="#20252F", width=1)
 
         if info is not None:
-            tcol = ("#0B0D10" if lit and _lum(rgb(info[1])) > 140 else
+            tcol = ("#08120A" if lit and _lum(rgb(info[1])) > 140 else
                     (INK if lit else INK_DIM))
             self.create_text((x0 + x1) // 2, (y0 + y1) // 2,
                              text=info[2], fill=tcol, font=FONT_PAD)
 
         if sel:
-            self._shape(x0 - 2, y0 - 2, x1 + 2, y1 + 2, round_btn,
+            self._shape(x0 - 3, y0 - 3, x1 + 3, y1 + 3, round_btn,
                         fill="", outline=SELECT, width=2)
 
 
@@ -299,6 +326,8 @@ class ManageApp(tk.Tk):
         st.map("Live.TButton", background=[("active", "#25E56C")])
         st.configure("Ghost.TButton", background=PANEL, foreground=INK_DIM)
         st.map("Ghost.TButton", background=[("active", PANEL2)])
+        st.configure("Danger.TButton", background="#1C1416", foreground=DANGER)
+        st.map("Danger.TButton", background=[("active", "#241719")])
         for w in ("TEntry", "TSpinbox"):
             st.configure(w, fieldbackground=WELL, foreground=INK, insertcolor=INK,
                          bordercolor=BEZEL, arrowcolor=INK_DIM, relief="flat",
@@ -340,10 +369,10 @@ class ManageApp(tk.Tk):
 
         ident = tk.Frame(top, bg=CHASSIS)
         ident.pack(side="left")
-        tk.Label(ident, text="NOVATION LAUNCHPAD MINI MK3", fg=INK_DIM, bg=CHASSIS,
+        tk.Label(ident, text="NOVATION LAUNCHPAD MINI MK3", fg=INK_DIM2, bg=CHASSIS,
                  font=FONT_EYE).pack(anchor="w")
         tk.Label(ident, text="Macro Manager", fg=INK, bg=CHASSIS,
-                 font=("DejaVu Sans", 17, "bold")).pack(anchor="w")
+                 font=FONT_TITLE).pack(anchor="w")
 
         actions = tk.Frame(top, bg=CHASSIS)
         actions.pack(side="right")
@@ -383,13 +412,16 @@ class ManageApp(tk.Tk):
         inner = tk.Frame(panel, bg=PANEL)
         inner.pack(fill="both", expand=True, padx=14, pady=14)
 
-        self._eyebrow(inner, "Rooms / Scenes").pack(fill="x")
-        self.rooms_list = self._listbox(inner, width=22)
-        self.rooms_list.pack(fill="y", expand=True, pady=(8, 8))
-        self.rooms_list.bind("<<ListboxSelect>>", lambda e: self._on_room_select())
+        tk.Frame(inner, bg=PANEL, width=250, height=1).pack()  # width strut
+        self._eyebrow(inner, "Rooms / Scenes").pack(fill="x", pady=(0, 8))
+
+        self.rooms_container = tk.Frame(inner, bg=PANEL)
+        self.rooms_container.pack(fill="both", expand=True)
+        self._room_active_idx: int | None = None
+        self._room_rows: list[tk.Frame] = []
 
         rb = tk.Frame(inner, bg=PANEL)
-        rb.pack(fill="x")
+        rb.pack(fill="x", pady=(10, 0))
         ttk.Button(rb, text="Add", width=6, command=self._add_room).pack(side="left")
         ttk.Button(rb, text="Rename", width=8, style="Ghost.TButton",
                    command=self._rename_room).pack(side="left", padx=4)
@@ -419,6 +451,8 @@ class ManageApp(tk.Tk):
         self.grid_room_var = tk.StringVar()
         tk.Label(head, textvariable=self.grid_room_var, fg=INK, bg=PANEL,
                  font=FONT_H).pack(side="left", padx=10)
+        tk.Label(head, text="novation", fg="#C3CAD6", bg=PANEL,
+                 font=FONT_BRAND).pack(side="right", padx=(12, 2))
         ttk.Button(head, text="Map layout", style="Ghost.TButton",
                    command=self._map_layout).pack(side="right")
 
@@ -457,9 +491,18 @@ class ManageApp(tk.Tk):
 
         self._eyebrow(parent, "Type").pack(fill="x")
         self.type_var = tk.StringVar(value="entity")
-        ttk.Combobox(parent, textvariable=self.type_var, values=["entity", "preset"],
-                     width=12, state="readonly").pack(fill="x", pady=(2, 10))
-        self.type_var.trace_add("write", lambda *a: self._sync_type_fields())
+        seg = tk.Frame(parent, bg=WELL, highlightbackground=BEZEL,
+                       highlightthickness=1)
+        seg.pack(fill="x", pady=(4, 10))
+        self._seg_btns: dict[str, tk.Label] = {}
+        for val, text in (("entity", "Entity"), ("preset", "Preset")):
+            b = tk.Label(seg, text=text, bg=WELL, fg=INK_DIM,
+                         font=("DejaVu Sans", 10, "bold"), pady=7, cursor="hand2")
+            b.pack(side="left", fill="x", expand=True, padx=3, pady=3)
+            b.bind("<Button-1>", lambda e, v=val: self.type_var.set(v))
+            self._seg_btns[val] = b
+        self.type_var.trace_add(
+            "write", lambda *a: (self._sync_seg(), self._sync_type_fields()))
 
         # entity/preset fields live here so they stay above Colors + buttons
         self.type_body = tk.Frame(parent, bg=PANEL)
@@ -499,11 +542,18 @@ class ManageApp(tk.Tk):
 
         brow = tk.Frame(parent, bg=PANEL)
         brow.pack(fill="x", pady=(16, 0))
-        ttk.Button(brow, text="Apply", command=self._apply_action).pack(
+        ttk.Button(brow, text="Apply changes", command=self._apply_action).pack(
             side="left", fill="x", expand=True)
-        ttk.Button(brow, text="Delete", width=8, style="Ghost.TButton",
+        ttk.Button(brow, text="Delete", width=8, style="Danger.TButton",
                    command=self._delete_action).pack(side="left", padx=(8, 0))
+        self._sync_seg()
         self._sync_type_fields()
+
+    def _sync_seg(self) -> None:
+        for val, b in self._seg_btns.items():
+            active = self.type_var.get() == val
+            b.configure(bg=PANEL2 if active else WELL,
+                        fg=INK if active else INK_DIM)
 
     def _color_widget(self, parent, label, var) -> None:
         f = tk.Frame(parent, bg=PANEL)
@@ -559,17 +609,53 @@ class ManageApp(tk.Tk):
 
     # ---- rooms ---------------------------------------------------------
 
+    def _render_room_rows(self) -> None:
+        for w in self._room_rows:
+            w.destroy()
+        self._room_rows = []
+        for idx, room in enumerate(self.config_model.rooms):
+            active = idx == self._room_active_idx
+            rowbg = PANEL2 if active else PANEL
+            row = tk.Frame(self.rooms_container, bg=rowbg, cursor="hand2")
+            row.pack(fill="x", pady=3)
+            self._room_rows.append(row)
+
+            accent = tk.Frame(row, bg=(GREEN if active else BEZEL), width=3, height=20)
+            accent.pack(side="left", padx=(9, 10), pady=9)
+            name = tk.Label(
+                row, text=room.name, bg=rowbg, fg=(INK if active else INK_DIM),
+                font=("DejaVu Sans", 11, "bold") if active else ("DejaVu Sans", 11),
+                anchor="w",
+            )
+            name.pack(side="left", fill="x", expand=True, pady=9)
+            cc = tk.Label(row, text=f"CC {room.room_key}", bg=WELL, fg=INK_DIM,
+                          font=FONT_EYE, padx=6, pady=2)
+            cc.pack(side="right", padx=(6, 10), pady=9)
+            n = len(room.actions)
+            if n:
+                badge = tk.Label(row, text=str(n), bg="#173322", fg="#7BE6A2",
+                                 font=FONT_EYE, padx=7, pady=2)
+                badge.pack(side="right", pady=9)
+            for w in (row, accent, name, cc):
+                w.bind("<Button-1>", lambda e, i=idx: self._select_room(i))
+
+    def _select_room(self, idx: int) -> None:
+        self._room_active_idx = idx
+        self._render_room_rows()
+        self._on_room_select()
+
     def _refresh_rooms(self) -> None:
-        self.rooms_list.delete(0, "end")
-        for r in self.config_model.rooms:
-            self.rooms_list.insert("end", f"{r.name}   CC {r.room_key}")
-        if self.config_model.rooms:
-            self.rooms_list.selection_set(0)
+        rooms = self.config_model.rooms
+        if self._room_active_idx is None and rooms:
+            self._room_active_idx = 0
+        elif self._room_active_idx is not None and self._room_active_idx >= len(rooms):
+            self._room_active_idx = len(rooms) - 1 if rooms else None
+        self._render_room_rows()
+        if self._room_active_idx is not None:
             self._on_room_select()
 
     def _selected_room_index(self) -> int | None:
-        sel = self.rooms_list.curselection()
-        return sel[0] if sel else None
+        return self._room_active_idx
 
     def _on_room_select(self) -> None:
         idx = self._selected_room_index()
@@ -596,10 +682,8 @@ class ManageApp(tk.Tk):
         if not name:
             return
         self.config_model.rooms.append(Room(name=name, room_key=0))
+        self._room_active_idx = len(self.config_model.rooms) - 1
         self._refresh_rooms()
-        self.rooms_list.selection_clear(0, "end")
-        self.rooms_list.selection_set("end")
-        self._on_room_select()
 
     def _rename_room(self) -> None:
         if not self.current_room:
@@ -609,10 +693,8 @@ class ManageApp(tk.Tk):
         )
         if name:
             self.current_room.name = name
-            idx = self._selected_room_index()
-            self._refresh_rooms()
-            if idx is not None:
-                self.rooms_list.selection_set(idx)
+            self.grid_room_var.set(name)
+            self._render_room_rows()
 
     def _del_room(self) -> None:
         idx = self._selected_room_index()

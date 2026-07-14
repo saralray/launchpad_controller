@@ -40,8 +40,13 @@ def save_settings(data: dict) -> None:
 
 
 def programmer_mode() -> bool:
-    """Whether to put the Launchpad in Programmer ('User') layout on connect."""
-    return bool(load_settings().get("launchpad_programmer_mode", True))
+    """Whether to put the Launchpad in Programmer layout on connect.
+
+    Defaults to False: config.json is authored for the Live layout (its
+    right-column room keys arrive as control_change only in Live), so the
+    daemon selects Live unless a settings.json opts into Programmer.
+    """
+    return bool(load_settings().get("launchpad_programmer_mode", False))
 
 
 def get_credentials() -> tuple[str | None, str | None]:

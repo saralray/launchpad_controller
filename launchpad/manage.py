@@ -29,7 +29,7 @@ from . import device
 from .config import Action, Config, Room, load_config, save_config
 from .ha_client import HAClient
 from .palette import hex_color, mix, rgb, to_hex
-from .settings import get_credentials, load_settings, save_settings
+from .settings import get_credentials, load_settings, programmer_mode, save_settings
 
 try:
     import mido
@@ -213,9 +213,9 @@ class MidiBridge:
             self.inport = mido.open_input(in_name)
             if out_name:
                 self.outport = mido.open_output(out_name)
-                # 'User'/Programmer layout so Learn reads the documented
-                # note/CC numbers that config.json + the grid geometry assume
-                self._set_programmer_mode()
+                # match the daemon's layout (Live by default) so Learn reads
+                # the same note/CC numbers config.json is authored in
+                self._set_programmer_mode(programmer_mode())
             self.in_name = in_name
             self.status = f"connected: {in_name}"
             threading.Thread(target=self._loop, daemon=True).start()
@@ -511,8 +511,10 @@ class ManageApp(tk.Tk):
         f.pack(fill="x", pady=3)
         tk.Label(f, text=label, fg=INK_DIM, bg=PANEL, font=FONT_EYE,
                  width=4, anchor="w").pack(side="left")
-        chip = tk.Canvas(f, width=52, height=26, bg=PANEL, highlightthickness=0)
+        chip = tk.Canvas(f, width=52, height=26, bg=PANEL, highlightthickness=0,
+                         cursor="hand2")
         chip.pack(side="left", padx=(0, 8))
+        chip.bind("<Button-1>", lambda _e: self._pick_color(var))
 
         def paint(*_):
             chip.delete("all")
@@ -523,8 +525,8 @@ class ManageApp(tk.Tk):
                              fill="#0B0D10" if _lum(col) > 140 else INK,
                              font=FONT_PAD)
 
-        ttk.Spinbox(f, from_=0, to=127, textvariable=var, width=5,
-                    font=FONT_MONO).pack(side="left")
+        ttk.Button(f, text="Pick", width=5, style="Ghost.TButton",
+                   command=lambda: self._pick_color(var)).pack(side="left", padx=(6, 0))
         ttk.Button(f, text="Test", width=5, style="Ghost.TButton",
                    command=lambda: self._test_color(var)).pack(side="left", padx=(6, 0))
         var.trace_add("write", paint)
@@ -877,6 +879,64 @@ class ManageApp(tk.Tk):
             side="right", padx=8)
         ttk.Button(btns, text="Cancel", style="Ghost.TButton",
                    command=win.destroy).pack(side="right")
+
+    def _pick_color(self, var) -> None:
+        """Popup grid of all 128 Launchpad palette swatches; click to set var.
+
+        Lights the pad live on click if the daemon is stopped (device held).
+        """
+        win = tk.Toplevel(self)
+        win.title("Pick pad color")
+        win.configure(bg=PANEL)
+        win.transient(self)
+        win.resizable(False, False)
+        win.grab_set()
+
+        frm = tk.Frame(win, bg=PANEL)
+        frm.pack(fill="both", expand=True, padx=14, pady=12)
+
+        cols, cell, gap = 16, 26, 3
+        cv = tk.Canvas(frm, bg=PANEL, highlightthickness=0,
+                       width=cols * (cell + gap) + gap,
+                       height=8 * (cell + gap) + gap)
+        cv.pack()
+
+        sel = {"v": var.get()}
+
+        def draw():
+            cv.delete("all")
+            for i in range(128):
+                r, c = divmod(i, cols)
+                x0 = gap + c * (cell + gap)
+                y0 = gap + r * (cell + gap)
+                col = rgb(i)
+                chosen = i == sel["v"]
+                cv.create_rectangle(
+                    x0, y0, x0 + cell, y0 + cell, fill=to_hex(col),
+                    outline=SELECT if chosen else to_hex(mix(col, CHASSIS_RGB, 0.5)),
+                    width=2 if chosen else 1)
+
+        def click(e):
+            c = int((e.x - gap) // (cell + gap))
+            r = int((e.y - gap) // (cell + gap))
+            i = r * cols + c
+            if 0 <= c < cols and 0 <= i < 128:
+                sel["v"] = i
+                var.set(i)
+                draw()
+                self._test_color(var)
+
+        cv.bind("<Button-1>", click)
+
+        tk.Label(frm, text="Click a swatch — lights the pad live if the daemon "
+                 "is stopped.", fg=INK_DIM, bg=PANEL,
+                 font=("DejaVu Sans", 8)).pack(anchor="w", pady=(8, 0))
+
+        btns = tk.Frame(frm, bg=PANEL)
+        btns.pack(fill="x", pady=(8, 0))
+        ttk.Button(btns, text="Done", style="Live.TButton",
+                   command=win.destroy).pack(side="right")
+        draw()
 
     def _test_color(self, var) -> None:
         if not self.current_action:

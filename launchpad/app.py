@@ -41,10 +41,11 @@ class Controller:
         self.programmer = programmer_mode()
 
     def _apply_layout(self) -> None:
-        # put the device into 'User'/Programmer layout so its note/CC numbers
-        # match config.json + the app grid, every time it (re)connects
-        if self.programmer:
-            self.midi.set_programmer_mode(True)
+        # force the device's layout so its note/CC numbers match config.json
+        # every time it (re)connects. config.json is authored for the Live
+        # layout (right-column room keys arrive as control_change there), so
+        # this actively resets a device left in Programmer by a prior run.
+        self.midi.set_programmer_mode(self.programmer)
 
     # ---- LED painting --------------------------------------------------
 

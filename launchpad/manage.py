@@ -77,7 +77,7 @@ CHASSIS_RGB = (11, 12, 16)
 PANEL = "#161922"
 PANEL2 = "#1F2430"  # raised controls
 WELL = "#0E1117"    # dark pad well / input field
-PAD_OFF = "#141821"  # unlit pad body
+PAD_OFF = "#1B212C"  # unlit pad body — sits clearly above the deck
 BEZEL = "#2B323E"
 HAIR = "#242A35"    # panel hairline border
 INK = "#E9ECF3"
@@ -114,9 +114,9 @@ def _lum(c: tuple[int, int, int]) -> float:
 # ======================================================================
 
 class PadGrid(tk.Canvas):
-    CELL = 46
-    GAP = 7
-    MARGIN = 16
+    CELL = 42
+    GAP = 6
+    MARGIN = 14
 
     def __init__(self, master, on_click):
         span = self.MARGIN * 2 + GRID * self.CELL + (GRID - 1) * self.GAP
@@ -177,21 +177,22 @@ class PadGrid(tk.Canvas):
 
         if lit:
             color = rgb(info[1])
-            # soft glow: concentric rings fading from the pad color into the
-            # chassis, brightest nearest the pad — fakes a bloom in Tk canvas.
-            for off, t in ((8, 0.86), (6, 0.72), (4, 0.54), (2, 0.34)):
+            # restrained halo: two faint rings bleeding the pad color into the
+            # deck. Kept thin/dim so the pad reads as a lit lens, not neon.
+            for off, t in ((5, 0.80), (2, 0.58)):
                 self._shape(x0 - off, y0 - off, x1 + off, y1 + off, round_btn,
                             fill="", outline=to_hex(mix(color, CHASSIS_RGB, t)),
-                            width=2)
-            # core, with a lighter top edge to suggest a lit lens
+                            width=1)
+            # core: solid fill with a border only a touch lighter than itself
             self._shape(x0, y0, x1, y1, round_btn, fill=to_hex(color),
-                        outline=to_hex(mix(color, WHITE, 0.45)), width=1)
-            self._shape(x0 + 3, y0 + 3, x1 - 3, y0 + 10, round_btn,
-                        fill="", outline=to_hex(mix(color, WHITE, 0.6)), width=1)
+                        outline=to_hex(mix(color, WHITE, 0.22)), width=1)
         else:
-            # unlit pad: subtle raised chiclet that recedes into the deck
+            # unlit pad: raised chiclet — lighter face over a dark seat so the
+            # 8x8 reads as buttons rather than holes in the deck
             self._shape(x0, y0, x1, y1, round_btn, fill=PAD_OFF,
-                        outline="#20252F", width=1)
+                        outline=BEZEL, width=1)
+            self._shape(x0 + 1, y0 + 1, x1 - 1, y0 + int((y1 - y0) * 0.5),
+                        round_btn, fill="", outline="#1B2028", width=1)
 
         if info is not None:
             tcol = ("#08120A" if lit and _lum(rgb(info[1])) > 140 else
@@ -451,8 +452,6 @@ class ManageApp(tk.Tk):
         self.grid_room_var = tk.StringVar()
         tk.Label(head, textvariable=self.grid_room_var, fg=INK, bg=PANEL,
                  font=FONT_H).pack(side="left", padx=10)
-        tk.Label(head, text="novation", fg="#C3CAD6", bg=PANEL,
-                 font=FONT_BRAND).pack(side="right", padx=(12, 2))
         ttk.Button(head, text="Map layout", style="Ghost.TButton",
                    command=self._map_layout).pack(side="right")
 
@@ -541,7 +540,7 @@ class ManageApp(tk.Tk):
         self._color_widget(crow, "Off", self.off_color_var)
 
         brow = tk.Frame(parent, bg=PANEL)
-        brow.pack(fill="x", pady=(16, 0))
+        brow.pack(side="bottom", fill="x", pady=(16, 0))
         ttk.Button(brow, text="Apply changes", command=self._apply_action).pack(
             side="left", fill="x", expand=True)
         ttk.Button(brow, text="Delete", width=8, style="Danger.TButton",

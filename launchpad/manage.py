@@ -19,13 +19,16 @@ Features:
 - Color fields can be previewed live on the device.
 
 This app never runs while the daemon owns the MIDI port; it edits config.json
-on disk. Restart the daemon after saving to apply changes.
+on disk. Saving restarts the systemd daemon automatically so the changes take
+effect (via systemctl, with a pkexec fallback for the privilege prompt).
 """
 
 from __future__ import annotations
 
 import json
 import queue
+import shutil
+import subprocess
 import threading
 from pathlib import Path
 
@@ -58,6 +61,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 PRESETS_DIR = PROJECT_ROOT / "presets"
 ICON_PATH = PROJECT_ROOT / "assets" / "launchpad.png"
+
+SERVICE_NAME = "launchpad_controller"
 
 GRID = 9  # 9x9 launchpad
 
@@ -955,11 +960,53 @@ class ManageApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Save failed", str(e))
             return
-        messagebox.showinfo(
-            "Saved",
-            "config.json written.\nRestart the daemon to apply:\n"
-            "sudo systemctl restart launchpad_controller",
-        )
+        ok, detail = self._restart_service()
+        if ok:
+            messagebox.showinfo(
+                "Saved",
+                "config.json written and the daemon was restarted "
+                "to apply the changes.",
+            )
+        else:
+            messagebox.showwarning(
+                "Saved (restart failed)",
+                "config.json written, but the daemon could not be "
+                f"restarted automatically:\n{detail}\n\n"
+                "Restart it manually to apply:\n"
+                f"sudo systemctl restart {SERVICE_NAME}",
+            )
+
+    def _restart_service(self) -> tuple[bool, str]:
+        """Restart the systemd daemon so saved config takes effect.
+
+        The manage GUI runs as the user while the daemon is a system
+        service, so a plain ``systemctl restart`` only succeeds when the
+        caller is root or already holds the polkit privilege. Fall back to
+        ``pkexec`` for a graphical authentication prompt otherwise. Returns
+        ``(ok, detail)`` where ``detail`` explains the failure.
+        """
+        if shutil.which("systemctl") is None:
+            return False, "systemctl not found (service not installed?)"
+
+        cmds = [["systemctl", "restart", SERVICE_NAME]]
+        if shutil.which("pkexec") is not None:
+            cmds.append(["pkexec", "systemctl", "restart", SERVICE_NAME])
+
+        last = ""
+        for cmd in cmds:
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30
+                )
+            except Exception as e:  # e.g. pkexec dialog cancelled/missing
+                last = str(e)
+                continue
+            if result.returncode == 0:
+                return True, ""
+            last = (result.stderr or result.stdout or "").strip() or (
+                f"exit code {result.returncode}"
+            )
+        return False, last
 
     def _export(self) -> None:
         path = filedialog.asksaveasfilename(

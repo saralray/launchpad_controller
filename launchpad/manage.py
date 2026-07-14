@@ -11,6 +11,9 @@ Features:
 - Learn mode: click Learn, press a physical Launchpad button, the note/CC
   number is captured. Requires the daemon stopped so this app can hold the
   MIDI port:  sudo systemctl stop launchpad_controller
+- Map layout: calibration wizard (Map layout button) that steps through every
+  grid position and records which physical button sits there, so the grid
+  matches your unit's actual note/CC numbering. Saved to layout.json.
 - Home Assistant entity picker: entities are fetched via .env credentials
   (falls back to free-text entry in passive mode).
 - Color fields can be previewed live on the device.
@@ -21,6 +24,7 @@ on disk. Restart the daemon after saving to apply changes.
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
 from pathlib import Path
@@ -28,8 +32,9 @@ from pathlib import Path
 from . import device
 from .config import Action, Config, Room, load_config, save_config
 from .ha_client import HAClient
+from .layout import Layout, load_layout, save_layout
 from .palette import hex_color, mix, rgb, to_hex
-from .settings import get_credentials, load_settings, programmer_mode, save_settings
+from .settings import get_credentials, load_settings, save_settings
 
 try:
     import mido
@@ -38,7 +43,7 @@ except Exception:  # pragma: no cover - optional at edit time
 
 try:
     import tkinter as tk
-    from tkinter import messagebox, simpledialog, ttk
+    from tkinter import filedialog, messagebox, simpledialog, ttk
 except ImportError:
     raise SystemExit(
         "Tkinter is required for the manage GUI but is not installed.\n"
@@ -86,25 +91,10 @@ def _lum(c: tuple[int, int, int]) -> float:
     return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
 
 
-# ======================================================================
-# grid geometry: map a note/CC number to a (row, col) cell, or None
-# ======================================================================
-
-def cell_for_number(number: int) -> tuple[int, int] | None:
-    """Standard Launchpad Mini MK3 X-Y layout.
-
-    Row 0 = top CC row (91-99). Col 8 = right-hand scene column (19..89).
-    Main 8x8 grid = notes 11-88 (tens = row from bottom, ones = column).
-    Numbers that don't fit return None (shown in the 'Unplaced' list).
-    """
-    if 91 <= number <= 99:
-        return (0, number - 91)
-    tens, ones = divmod(number, 10)
-    if 1 <= tens <= 8 and ones == 9:  # right scene column
-        return (9 - tens, 8)
-    if 1 <= tens <= 8 and 1 <= ones <= 8:  # main grid
-        return (9 - tens, ones - 1)
-    return None
+# Grid geometry lives in launchpad/layout.py: a `Layout` maps note/CC
+# numbers to (row, col) cells, either from the documented formula or from
+# a calibration the user recorded with the "Map layout" wizard. The app
+# holds one `self.layout` instance and routes all placement through it.
 
 
 # ======================================================================
@@ -203,20 +193,16 @@ class MidiBridge:
         try:
             ins = mido.get_input_names()
             outs = mido.get_output_names()
-            in_name = next(
-                (p for p in ins if "launchpad" in p.lower() and "da" in p.lower()),
-                None,
-            )
-            out_name = next((p for p in outs if "launchpad" in p.lower()), None)
+            in_name = device.pick_launchpad_port(ins)
+            out_name = device.pick_launchpad_port(outs)
             if not in_name:
                 self.status = "Launchpad not found"
                 return
             self.inport = mido.open_input(in_name)
             if out_name:
                 self.outport = mido.open_output(out_name)
-                # match the daemon's layout (Live by default) so Learn reads
-                # the same note/CC numbers config.json is authored in
-                self._set_programmer_mode(programmer_mode())
+                # no layout is forced — Learn/Map read the device's real
+                # note/CC numbers, exactly as the daemon and keychecker see them
             self.in_name = in_name
             self.status = f"connected: {in_name}"
             threading.Thread(target=self._loop, daemon=True).start()
@@ -231,14 +217,6 @@ class MidiBridge:
                 self.events.put(("note", msg.note))
             elif msg.type == "control_change" and msg.value > 0:
                 self.events.put(("cc", msg.control))
-
-    def _set_programmer_mode(self, on: bool = True) -> None:
-        if not self.outport:
-            return
-        try:
-            self.outport.send(mido.Message("sysex", data=device.layout_sysex(on)))
-        except Exception:
-            pass
 
     def light(self, number: int, color: int, is_cc: bool) -> None:
         if not self.outport:
@@ -276,9 +254,11 @@ class ManageApp(tk.Tk):
         self._set_app_icon()
 
         self.config_model: Config = load_config(CONFIG_PATH)
+        self.layout: Layout = load_layout()
         self.midi = MidiBridge()
         self.entities: list[str] = []
         self.learn_target = None  # tk.Entry awaiting a captured number
+        self.map_capture = None  # callback(kind, number) for the layout wizard
         self.current_room: Room | None = None
         self.current_action: Action | None = None
 
@@ -364,6 +344,8 @@ class ManageApp(tk.Tk):
         actions.pack(side="right")
         ttk.Button(actions, text="Save config", style="Live.TButton",
                    command=self._save).pack(side="right")
+        ttk.Button(actions, text="Download JSON", style="Ghost.TButton",
+                   command=self._export).pack(side="right", padx=(8, 0))
         ttk.Button(actions, text="Reload", style="Ghost.TButton",
                    command=self._reload).pack(side="right", padx=8)
         ttk.Button(actions, text="Connection", style="Ghost.TButton",
@@ -432,6 +414,8 @@ class ManageApp(tk.Tk):
         self.grid_room_var = tk.StringVar()
         tk.Label(head, textvariable=self.grid_room_var, fg=INK, bg=PANEL,
                  font=FONT_H).pack(side="left", padx=10)
+        ttk.Button(head, text="Map layout", style="Ghost.TButton",
+                   command=self._map_layout).pack(side="right")
 
         wrap = tk.Frame(inner, bg=PANEL)
         wrap.pack(expand=True)
@@ -646,14 +630,14 @@ class ManageApp(tk.Tk):
         # room selectors across all rooms give spatial context; the active
         # room's own selector glows brighter so you can place yourself
         for room in self.config_model.rooms:
-            cell = cell_for_number(room.room_key)
+            cell = self.layout.cell_for_number(room.room_key, is_cc=True)
             if cell:
                 color = (room.room_key_color_any_on if room is self.current_room
                          else room.room_key_color_off)
                 pads[cell] = ("selector", color, "RM")
 
         for act in self.current_room.actions:
-            cell = cell_for_number(act.key)
+            cell = self.layout.cell_for_number(act.key)
             label = act.preset[:4] if act.is_preset else str(act.key)
             if cell:
                 pads[cell] = ("macro", act.on_color, label)
@@ -661,16 +645,17 @@ class ManageApp(tk.Tk):
                 self._unplaced_actions.append(act)
                 self.unplaced.insert("end", f"{act.key}  {label}")
 
-        selected = (cell_for_number(self.current_action.key)
+        selected = (self.layout.cell_for_number(self.current_action.key)
                     if self.current_action else None)
         self.pad_grid.render(pads, selected)
 
     def _on_cell(self, r: int, c: int) -> None:
         if not self.current_room:
             return
-        number = self._number_for_cell(r, c)
+        number = self.layout.number_for_cell(r, c)
         act = next(
-            (a for a in self.current_room.actions if cell_for_number(a.key) == (r, c)),
+            (a for a in self.current_room.actions
+             if self.layout.cell_for_number(a.key) == (r, c)),
             None,
         )
         if act is None:
@@ -681,12 +666,6 @@ class ManageApp(tk.Tk):
             act = Action(key=number, on_color=21, off_color=5, entity_ids=[])
             self.current_room.actions.append(act)
         self._edit_action(act)
-
-    def _number_for_cell(self, r: int, c: int) -> int | None:
-        for n in range(0, 100):
-            if cell_for_number(n) == (r, c):
-                return n
-        return None
 
     def _on_unplaced(self) -> None:
         sel = self.unplaced.curselection()
@@ -779,7 +758,9 @@ class ManageApp(tk.Tk):
         try:
             while True:
                 kind, number = self.midi.events.get_nowait()
-                if self.learn_target is not None:
+                if self.map_capture is not None:
+                    self.map_capture(kind, number)
+                elif self.learn_target is not None:
                     self.learn_target.delete(0, "end")
                     self.learn_target.insert(0, str(number))
                     self.learn_target = None
@@ -787,6 +768,19 @@ class ManageApp(tk.Tk):
         except queue.Empty:
             pass
         self.after(50, self._poll_midi)
+
+    def _map_layout(self) -> None:
+        if self.midi.inport is None:
+            messagebox.showwarning(
+                "No MIDI",
+                "Launchpad not connected. Stop the daemon first:\n"
+                "sudo systemctl stop launchpad_controller",
+            )
+            return
+        if self.learn_target is not None:
+            self.learn_target = None
+            self.status_var.set(self.midi.status)
+        LayoutWizard(self)
 
     def _update_led(self) -> None:
         s = self.midi.status
@@ -967,12 +961,160 @@ class ManageApp(tk.Tk):
             "sudo systemctl restart launchpad_controller",
         )
 
+    def _export(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Download config as JSON",
+            defaultextension=".json",
+            initialfile="config.json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w") as f:
+                json.dump(self.config_model.to_dict(), f, indent=2)
+        except Exception as e:
+            messagebox.showerror("Download failed", str(e))
+            return
+        messagebox.showinfo("Downloaded", f"Config written to:\n{path}")
+
     def _reload(self) -> None:
         self.config_model = load_config(CONFIG_PATH)
         self._refresh_rooms()
 
     def _on_close(self) -> None:
         self.midi.close()
+        self.destroy()
+
+
+# ======================================================================
+# LayoutWizard: calibrate which physical button sits at each grid cell
+# ======================================================================
+
+class LayoutWizard(tk.Toplevel):
+    """Walk every grid position; the button pressed there is recorded.
+
+    Starts from the app's current layout so re-running only touches cells
+    you re-press. Skip leaves a cell as-is; clicking a cell jumps the
+    target there so you can fix one position without a full pass.
+    """
+
+    MAP_COLOR = 21  # green swatch for an already-mapped cell
+
+    def __init__(self, app: "ManageApp"):
+        super().__init__(app)
+        self.app = app
+        self.title("Map layout")
+        self.configure(bg=CHASSIS)
+        self.transient(app)
+        self.grab_set()
+
+        self.work = Layout(app.layout.as_dict())  # edit a copy; commit on Finish
+        # Skip the top bar (row 0, the CC function/selector row) — only the
+        # 8x8 grid and right scene column get calibrated; unmapped cells fall
+        # back to the documented formula.
+        self.order = [(r, c) for r in range(1, GRID) for c in range(GRID)]
+        self.idx = 0
+
+        frm = tk.Frame(self, bg=CHASSIS)
+        frm.pack(fill="both", expand=True, padx=18, pady=16)
+
+        app._eyebrow(frm, "Calibrate layout").pack(fill="x")
+        tk.Label(frm, text="Press the physical button that sits at the "
+                 "highlighted position. The number it sends is recorded there.",
+                 fg=INK_DIM, bg=CHASSIS, font=("DejaVu Sans", 9),
+                 wraplength=460, justify="left").pack(fill="x", pady=(2, 10))
+
+        self.grid_view = PadGrid(frm, self._on_cell_click)
+        self.grid_view.pack()
+
+        self.prompt = tk.StringVar()
+        tk.Label(frm, textvariable=self.prompt, fg=INK, bg=CHASSIS,
+                 font=FONT_MONO).pack(fill="x", pady=(10, 8))
+
+        btns = tk.Frame(frm, bg=CHASSIS)
+        btns.pack(fill="x")
+        ttk.Button(btns, text="Finish & save", style="Live.TButton",
+                   command=self._finish).pack(side="right")
+        ttk.Button(btns, text="Skip", style="Ghost.TButton",
+                   command=self._skip).pack(side="right", padx=8)
+        ttk.Button(btns, text="Back", style="Ghost.TButton",
+                   command=self._back).pack(side="right")
+        ttk.Button(btns, text="Cancel", style="Ghost.TButton",
+                   command=self._cancel).pack(side="left")
+
+        app.map_capture = self._on_press
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self._render()
+
+    # ---- rendering -----------------------------------------------------
+
+    def _render(self) -> None:
+        pads: dict[tuple[int, int], tuple[str, int, str]] = {}
+        for (r, c), (is_cc, num) in self.work.as_dict().items():
+            label = f"c{num}" if is_cc else str(num)
+            pads[(r, c)] = ("map", self.MAP_COLOR, label)
+        target = self.order[self.idx] if self.idx < len(self.order) else None
+        self.grid_view.render(pads, target)
+        if target is None:
+            self.prompt.set("All positions visited — Finish & save, or click a "
+                            "cell to redo it.")
+        else:
+            r, c = target
+            cur = self.work.number_for_cell(r, c)
+            note = f"  (currently {cur})" if cur is not None else ""
+            self.prompt.set(f"Position row {r}, col {c}  "
+                            f"[{self.idx + 1}/{len(self.order)}]{note} — "
+                            f"press its button")
+
+    # ---- events --------------------------------------------------------
+
+    def _on_press(self, kind: str, number: int) -> None:
+        if self.idx >= len(self.order):
+            return
+        r, c = self.order[self.idx]
+        is_cc = kind == "cc"
+        self.work.set_cell(r, c, number, is_cc)
+        self.app.midi.light(number, self.MAP_COLOR, is_cc)  # confirm blink
+        self._advance()
+
+    def _on_cell_click(self, r: int, c: int) -> None:
+        if (r, c) in self.order:
+            self.idx = self.order.index((r, c))
+            self._render()
+
+    def _advance(self) -> None:
+        if self.idx < len(self.order):
+            self.idx += 1
+        self._render()
+
+    def _skip(self) -> None:
+        self._advance()
+
+    def _back(self) -> None:
+        if self.idx > 0:
+            self.idx -= 1
+        self._render()
+
+    # ---- finish --------------------------------------------------------
+
+    def _finish(self) -> None:
+        try:
+            save_layout(self.work)
+        except Exception as e:
+            messagebox.showerror("Save failed", str(e))
+            return
+        self.app.layout = self.work
+        self._teardown()
+        self.app._refresh_grid()
+        self.app.status_var.set(f"Layout saved: {len(self.work.as_dict())} pads mapped")
+
+    def _cancel(self) -> None:
+        self._teardown()
+
+    def _teardown(self) -> None:
+        self.app.map_capture = None
+        self.grab_release()
         self.destroy()
 
 

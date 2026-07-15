@@ -26,6 +26,7 @@ effect (via systemctl, with a pkexec fallback for the privilege prompt).
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import subprocess
@@ -63,6 +64,51 @@ PRESETS_DIR = PROJECT_ROOT / "presets"
 ICON_PATH = PROJECT_ROOT / "assets" / "launchpad.png"
 
 SERVICE_NAME = "launchpad_controller"
+
+# Tk's own file dialog looks dated on GNOME/KDE; prefer the native picker
+# (zenity / kdialog) when present, fall back to Tk everywhere else.
+_NATIVE_PICKER = shutil.which("zenity") or shutil.which("kdialog")
+
+
+def _zenity(save: bool, title: str, initialdir: str, initialfile: str) -> str | None:
+    cmd = ["zenity", "--file-selection", f"--title={title}"]
+    if save:
+        cmd += ["--save", "--confirm-overwrite"]
+    start = os.path.join(initialdir, initialfile) if initialfile else initialdir + os.sep
+    if start:
+        cmd.append(f"--filename={start}")
+    cmd += ["--file-filter=JSON files | *.json", "--file-filter=All files | *"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+def _kdialog(save: bool, title: str, initialdir: str, initialfile: str) -> str | None:
+    start = os.path.join(initialdir, initialfile) if initialfile else initialdir
+    flag = "--getsavefilename" if save else "--getopenfilename"
+    r = subprocess.run(
+        ["kdialog", flag, start, "*.json *.JSON | JSON files", f"--title={title}"],
+        capture_output=True, text=True,
+    )
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+def pick_file(*, save: bool, title: str, initialfile: str = "") -> str | None:
+    """Native file picker with Tk fallback. Returns a path or None if cancelled."""
+    initialdir = str(PROJECT_ROOT)
+    picker = _NATIVE_PICKER or ""
+    try:
+        if picker.endswith("zenity"):
+            return _zenity(save, title, initialdir, initialfile)
+        if picker.endswith("kdialog"):
+            return _kdialog(save, title, initialdir, initialfile)
+    except Exception:
+        pass  # any native failure -> Tk
+    fn = filedialog.asksaveasfilename if save else filedialog.askopenfilename
+    return fn(
+        title=title, defaultextension=".json", initialdir=initialdir,
+        initialfile=initialfile,
+        filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+    ) or None
 
 GRID = 9  # 9x9 launchpad
 
@@ -1092,28 +1138,35 @@ class ManageApp(tk.Tk):
         return False, last
 
     def _export(self) -> None:
-        path = filedialog.asksaveasfilename(
-            title="Download config as JSON",
-            defaultextension=".json",
-            initialfile="config.json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-        )
+        url, token = get_credentials()
+        if token and not messagebox.askyesno(
+            "Include credentials?",
+            "This backup will contain your Home Assistant URL and API token "
+            "in plain text.\n\nAnyone with the file can control your Home "
+            "Assistant. Continue?",
+        ):
+            return
+        path = pick_file(save=True, title="Download config as JSON",
+                         initialfile="config.json")
         if not path:
             return
+        data = self.config_model.to_dict()
+        if url or token:
+            data["settings"] = {"hass_url": url, "hass_token": token}
         try:
             with open(path, "w") as f:
-                json.dump(self.config_model.to_dict(), f, indent=2)
+                json.dump(data, f, indent=2)
+            try:
+                os.chmod(path, 0o600)  # contains a token
+            except OSError:
+                pass
         except Exception as e:
             messagebox.showerror("Download failed", str(e))
             return
         messagebox.showinfo("Downloaded", f"Config written to:\n{path}")
 
     def _import(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Import config from JSON",
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-        )
+        path = pick_file(save=False, title="Import config from JSON")
         if not path:
             return
         try:
@@ -1122,7 +1175,19 @@ class ManageApp(tk.Tk):
             rooms = [Room.from_dict(r) for r in data.get("rooms", [])]
             self.config_model = Config(rooms=rooms)
             self._refresh_rooms()
-            messagebox.showinfo("Imported", f"Successfully imported config from:\n{path}\n\nClick 'Save config' to apply.")
+            creds = data.get("settings") or {}
+            restored = ""
+            if (creds.get("hass_url") or creds.get("hass_token")) and messagebox.askyesno(
+                "Restore credentials?",
+                "This backup contains Home Assistant credentials. "
+                "Overwrite your current connection settings with them?",
+            ):
+                s = load_settings()
+                s["hass_url"] = creds.get("hass_url", "")
+                s["hass_token"] = creds.get("hass_token", "")
+                save_settings(s)
+                restored = "\nConnection settings restored (restart the daemon to apply)."
+            messagebox.showinfo("Imported", f"Successfully imported config from:\n{path}\n\nClick 'Save config' to apply.{restored}")
         except Exception as e:
             messagebox.showerror("Import failed", f"Error parsing config: {e}")
 

@@ -17,6 +17,9 @@ class MidiSurface:
         self.outport = None
         self.in_name: str | None = None
         self.out_name: str | None = None
+        # layout SysEx to send whenever the device (re)connects; None = leave
+        # the surface in whatever layout it powers up in (historical default).
+        self.startup_layout: int | None = None
 
     def open(self) -> None:
         """Block until both Launchpad in/out ports appear, then open them."""
@@ -32,6 +35,8 @@ class MidiSurface:
                 self.outport = mido.open_output(out_name)
                 self.in_name = in_name
                 self.out_name = out_name
+                if self.startup_layout is not None:
+                    self.select_layout(self.startup_layout)
                 print(f"✅ Connected: {in_name}")
                 return
 
@@ -55,6 +60,17 @@ class MidiSurface:
             return
         try:
             self.outport.send(mido.Message("sysex", data=device.layout_sysex(on)))
+        except Exception:
+            pass
+
+    def select_layout(self, layout: int) -> None:
+        """Select a surface layout (device.CUSTOM_1 etc). Best-effort."""
+        if not self.outport:
+            return
+        try:
+            self.outport.send(
+                mido.Message("sysex", data=device.select_layout_sysex(layout))
+            )
         except Exception:
             pass
 

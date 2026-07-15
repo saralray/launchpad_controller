@@ -14,6 +14,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import device
 from .config import Config, Room, load_config
 from .ha_client import HAClient
 from .midi import MidiSurface
@@ -26,6 +27,11 @@ ON_STATES = ("on", "cool")
 # minimum seconds between full pad repaints (~12.5 Hz)
 PAD_REFRESH_INTERVAL = 0.08
 
+# layout the Launchpad jumps to on (re)connect. CUSTOM_3 = the device's
+# "User"-labelled tab (factory default); use device.PROGRAMMER_LAYOUT for the
+# full-surface documented numbering.
+STARTUP_LAYOUT = device.CUSTOM_3
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
@@ -35,9 +41,16 @@ class Controller:
         self.config = config
         self.ha = ha
         self.midi = midi
-        self.active_room: Room = config.rooms[0]
+        self.active_room: Room = self._initial_room()
         self.preset_ha = PresetHA(ha)
         self._last_update = 0.0
+
+    def _initial_room(self) -> Room:
+        """Start on the Presets room if the config has one, else the first."""
+        for room in self.config.rooms:
+            if "preset" in (room.name or "").lower():
+                return room
+        return self.config.rooms[0]
 
     # ---- LED painting --------------------------------------------------
 
@@ -137,6 +150,7 @@ def main() -> None:
     url, token = get_credentials()
     ha = HAClient(url, token)
     midi = MidiSurface()
+    midi.startup_layout = STARTUP_LAYOUT
     controller = Controller(load_config(CONFIG_PATH), ha, midi)
 
     def shutdown(sig, frame):

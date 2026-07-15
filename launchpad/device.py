@@ -10,10 +10,20 @@ numbers a differently-configured unit emits.
 
 from __future__ import annotations
 
-# Novation (00 20 29) · Launchpad Mini MK3 (02 0D) · layout/mode select (0E)
+# Novation (00 20 29) · Launchpad Mini MK3 (02 0D) · programmer/live toggle (0E)
 _LAYOUT_SELECT = [0x00, 0x20, 0x29, 0x02, 0x0D, 0x0E]
 PROGRAMMER = 0x01
 LIVE = 0x00
+
+# Select-layout command (00): pick which page the surface shows. Values per the
+# Mini MK3 programmer's reference. Custom modes expose only the 8x8 grid; the
+# top CC row and scene column go dark. Programmer (0x7F) is the only full-surface
+# layout. Session/DAW-faders are selectable only while the unit is in DAW mode.
+_SELECT_LAYOUT = [0x00, 0x20, 0x29, 0x02, 0x0D, 0x00]
+CUSTOM_1 = 0x04  # first custom tab (Drum Rack by factory default)
+CUSTOM_2 = 0x05  # Keys by factory default
+CUSTOM_3 = 0x06  # the device's "User"-labelled button by factory default
+PROGRAMMER_LAYOUT = 0x7F
 
 
 def pick_launchpad_port(names: list[str]) -> str | None:
@@ -35,3 +45,12 @@ def layout_sysex(programmer: bool = True) -> list[int]:
     Pass to mido as: mido.Message("sysex", data=layout_sysex(...)).
     """
     return _LAYOUT_SELECT + [PROGRAMMER if programmer else LIVE]
+
+
+def select_layout_sysex(layout: int) -> list[int]:
+    """SysEx payload (without F0/F7) selecting a surface layout.
+
+    Pass one of CUSTOM_1/CUSTOM_2/CUSTOM_3/PROGRAMMER_LAYOUT. Send via mido as:
+    mido.Message("sysex", data=select_layout_sysex(...)).
+    """
+    return _SELECT_LAYOUT + [layout]
